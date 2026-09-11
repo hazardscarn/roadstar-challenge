@@ -25,14 +25,18 @@ import pandas as pd
 
 from sim.config import (
     ASSUMED_CAPACITY_VALUE_RATE_PER_LB, ASSUMED_OPERATING_COST_PER_MILE, CAPACITY_BY_LOAD_TYPE,
-    CAPACITY_PALLETS_BY_LOAD_TYPE, HOS_MIN_DAILY_OFF_DUTY_HOURS, linehaul_rate_per_mile,
+    CAPACITY_PALLETS_BY_LOAD_TYPE, DISPATCH_DECISION_CUTOFF_HOURS, HOS_MIN_DAILY_OFF_DUTY_HOURS,
+    linehaul_rate_per_mile,
 )
 from sim.db import cursor
 from sim.load_ground_truth import EXCEL_PATH
 from sim.engine.hos import DRIVING, HOSLog, OFF_DUTY
 from sim.engine.maintenance import TruckMaintenanceState
 from sim.engine.reward import compute_reward
-from sim.engine.run_sim import Order, driver_home_hub_id, get_route, initialize_fleet, load_sim_data, run_simulation
+from sim.engine.run_sim import (
+    Order, _haversine_km, driver_home_hub_id, get_route, initialize_fleet, load_sim_data,
+    repositioning_outcome, run_simulation,
+)
 from sim.engine.value_function import load_state_value_model, make_value_fn
 
 
@@ -231,6 +235,15 @@ def run_experiment(model_path: str = 'sim/training/state_value_function.pkl', re
     result = run_simulation(hours=0, seed=1, epsilon_start=0.0, epsilon_end=0.0, data=data, orders=orders, value_fn=value_fn)
     all_trips = result['completed_trips']
     unassigned_ids = set(result['unassigned_order_ids'])
+    # Real bug fixed here (same class the cycle analysis had, documents/logs/27 follow-up):
+    # IDLE_TIMEOUT/IDLE_REPOSITION_COMPLETE mutates fleet.drivers[...].location_id directly,
+    # OUTSIDE any CompletedTrip's own next_location_id -- trained_home_progress() below used to
+    # walk driver_trips alone, so a driver whose LAST real event before the window ended was an
+    # idle-timeout relocation (not a real trip) had that relocation silently invisible to the
+    # "distance to home at end of window" metric. Grouped by driver, merged in by timestamp.
+    idle_repositions_by_driver: dict[int, list] = {}
+    for ev in result['idle_repositions']:
+        idle_repositions_by_driver.setdefault(ev['driver_id'], []).append(ev)
 
     # Split the trained result back into "was this a dispatched-order trip or a
     # recovered-opportunity trip" for reporting -- both ran in the SAME replay/fleet state, just
@@ -396,19 +409,33 @@ def run_experiment(model_path: str = 'sim/training/state_value_function.pkl', re
         driver_trips = sorted(trips_by_driver.get(driver_id, []), key=lambda c: c.assigned_at)
         if not include_recovered:
             driver_trips = [c for c in driver_trips if c.order.order_id not in undispatched_order_ids]
-        if not driver_trips:
-            return 0.0, 0.0, 0.0, 0  # never dispatched in this replay -- still at home
+        # Merge in any real IDLE_TIMEOUT relocations (see this function's own comment above) --
+        # a real leg with no attached order/revenue, chronologically interleaved with the real
+        # trips rather than appended at the end, so a relocation that happened BETWEEN two real
+        # trips (not just after the last one) is walked in its correct real position too.
+        idle_events = idle_repositions_by_driver.get(driver_id, [])
+        timeline = (
+            [(c.assigned_at, 'trip', c) for c in driver_trips]
+            + [(ev['time'], 'idle', ev) for ev in idle_events]
+        )
+        timeline.sort(key=lambda item: item[0])
+        if not timeline:
+            return 0.0, 0.0, 0.0, 0  # never dispatched or relocated in this replay -- still at home
         prev_dist = 0.0  # starts at home
         total_progress = 0.0
         homeward_revenue = 0.0
         n_homeward_legs = 0
-        for c in driver_trips:
-            final_location = c.next_location_id or c.order.dest_location_id
+        for _, kind, payload in timeline:
+            if kind == 'trip':
+                c = payload
+                final_location = c.next_location_id or c.order.dest_location_id
+            else:
+                final_location = payload['to_location_id']
             dist_after, _ = get_route(data, final_location, home_hub)
             delta = prev_dist - dist_after
             total_progress += delta
-            if delta > 0:
-                homeward_revenue += c.order_revenue  # the REAL revenue this specific leg earned, not a guess
+            if kind == 'trip' and delta > 0:
+                homeward_revenue += payload.order_revenue  # the REAL revenue this specific leg earned, not a guess
                 n_homeward_legs += 1
             prev_dist = dist_after
         return total_progress, prev_dist, homeward_revenue, n_homeward_legs
@@ -642,6 +669,7 @@ def run_cycle_analysis(model_path: str = 'sim/training/state_value_function.pkl'
     orders = dispatched_orders + undispatched_orders
     orders.sort(key=lambda o: o.decision_time)
     sim_start = min(o.decision_time for o in orders)  # SAME computation run_simulation() does internally when orders= is given
+    sim_end = max(o.decision_time for o in orders) + timedelta(hours=1)  # SAME sim_end run_simulation() derives internally -- the real, shared window boundary both arms' idle-timeout checks run against
 
     # --- REAL HOS reconstruction, starting from the IDENTICAL synthesized condition TRAINED's own
     # simulated fleet starts from -- direct user request: "same drivers, so we can start them with
@@ -716,31 +744,148 @@ def run_cycle_analysis(model_path: str = 'sim/training/state_value_function.pkl'
     print(f'Running cycle analysis (model={model_path}, matched 42-driver pool)...')
     result = run_simulation(hours=0, seed=1, epsilon_start=0.0, epsilon_end=0.0, data=data, orders=orders, value_fn=value_fn)
     all_trips = result['completed_trips']
-    undispatched_order_ids = {o.order_id for o in undispatched_orders}
-    trips = [c for c in all_trips if c.order.order_id not in undispatched_order_ids]  # dispatched-only, matches REAL's own order set exactly
+    # Real bug fixed here (direct user pushback: "this still shows higher revenue for REAL"):
+    # this used to filter down to dispatched-only trips, "matching REAL's own order set exactly"
+    # -- but the driver's REAL decisions (which order to take, when to reposition) were already
+    # made with the FULL merged order book available (the run_simulation() call above gets ALL
+    # orders, dispatched + the 130 recovered ones), and every OTHER panel in this same dashboard
+    # (missed-opportunity recovery, work distribution, revenue totals) credits TRAINED for those
+    # 130 orders -- "TRAINED" means the same thing everywhere else in this file. Silently dropping
+    # them here didn't just understate revenue, it broke cycle-timeline continuity: a recovered
+    # order that happened to land a driver at home was an invisible cycle-close, and a recovered
+    # order taken between two dispatched ones left a real gap in the walk trained_cycles() never
+    # knew existed. ALL of TRAINED's real trips are included now, same definition as everywhere else.
     trips_by_driver: dict[int, list] = {}
-    for c in trips:
+    for c in all_trips:
         trips_by_driver.setdefault(c.driver_id, []).append(c)
+    # Real bug fixed here: IDLE_TIMEOUT/IDLE_REPOSITION_COMPLETE (documents/logs/25-27) mutates
+    # fleet.drivers[...].location_id directly -- OUTSIDE any CompletedTrip's own next_location_id
+    # -- so trained_cycles() below, which used to walk trips_by_driver alone, silently missed every
+    # real relocation this mechanism produced. Confirmed directly: this exact replay produces 32
+    # real IDLE_TIMEOUT repositions (2,260mi) that were invisible to the cycle analysis until this
+    # fix. Grouped by driver and merged into the per-driver timeline below.
+    idle_repositions_by_driver: dict[int, list] = {}
+    for ev in result['idle_repositions']:
+        idle_repositions_by_driver.setdefault(ev['driver_id'], []).append(ev)
 
     def real_order_revenue(row) -> float:
         loaded_miles, _ = get_route(data, row.origin_location_id, row.dest_location_id)
         return loaded_miles * linehaul_rate_per_mile(loaded_miles)
 
+    def real_idle_gap_events(
+        rng: random.Random, home_hub: int, hos_log: HOSLog | None, start_loc: int, start_time,
+        gap_end, hours_since_home_at_start: float,
+    ) -> tuple[list[dict], int, float]:
+        """Direct user correction: REAL wasn't being judged by the same idle-time standard
+        TRAINED is -- REAL's cycle-closing only ever checked a driver's position at the very tail
+        of their whole real order sequence, never mid-window, so a real multi-day gap between two
+        real jobs was silently free for REAL while the identical situation costs TRAINED a real,
+        priced leg via IDLE_TIMEOUT. This mirrors that exact mechanism for REAL: every 24h
+        (DISPATCH_DECISION_CUTOFF_HOURS, the same real number IDLE_TIMEOUT reschedules on) within
+        a real idle gap, run the SAME `repositioning_outcome()` decision run_sim.py's own
+        IDLE_TIMEOUT/immediate post-delivery branches use, with REAL's own reconstructed HOS/
+        position/hours-since-home at that point -- not a new, bespoke rule invented for REAL.
+        Returns (events, final_location_id, final_hours_since_home); events are shaped exactly
+        like run_sim.py's own idle_repositions entries for identical downstream handling.
+        """
+        events: list[dict] = []
+        loc = start_loc
+        hours_since_home = hours_since_home_at_start
+        t = start_time
+        while True:
+            next_check = t + timedelta(hours=DISPATCH_DECISION_CUTOFF_HOURS)
+            if next_check >= gap_end:
+                return events, loc, hours_since_home
+            t = next_check
+            hours_since_home += DISPATCH_DECISION_CUTOFF_HOURS
+            if loc == home_hub:
+                continue  # already home -- nothing to reposition, matches IDLE_TIMEOUT's own guard
+            hos_state = hos_log.snapshot(t) if hos_log else None
+            remaining_cycle = (
+                min(hos_state.remaining_cycle1_hours, hos_state.remaining_cycle2_hours)
+                if hos_state is not None else 999.0  # no real log for this driver -- never legally binding, matches HOSState's own generous fallback elsewhere
+            )
+            nearest_hub_id = min(
+                data.hub_ids.values(), key=lambda hid: _haversine_km(data.locations[loc], data.locations[hid]),
+            )
+            dist_to_hub_km = _haversine_km(data.locations[loc], data.locations[nearest_hub_id])
+            hours_to_home = get_route(data, loc, home_hub)[1]
+            outcome, target = repositioning_outcome(
+                loc, home_hub, nearest_hub_id, dist_to_hub_km, remaining_cycle, hours_since_home,
+                hours_to_home, rng,
+            )
+            if outcome == 'reposition':
+                dh_miles, dh_hours = get_route(data, loc, target)
+                arrival = t + timedelta(hours=dh_hours)
+                reached_home = target == home_hub
+                events.append({
+                    'time': arrival, 'to_location_id': target, 'miles': dh_miles, 'reached_home': reached_home,
+                })
+                loc, t = target, arrival
+                if reached_home:
+                    hours_since_home = 0.0
+
     def real_cycles(driver_id: int) -> list[dict]:
-        """Every cycle closed -- via a real paid delivery landing at home (extra_empty_miles=0,
-        closed_via='trip'), or via an ASSUMED empty return once the real order sequence runs out
-        (extra_empty_miles=get_route(last position, home), closed_via='assumed', revenue=0 for
-        that closing leg since nothing real covers it -- REAL's own gap this whole analysis is
-        meant to price, not exclude). hos_remaining_at_return: real, reconstructed from the SAME
-        seeded starting condition TRAINED used (real_hos_logs above) -- None only if this driver's
-        real timestamps didn't support a clean log.
+        """Every cycle closed -- via a real paid delivery landing at home (closed_via='trip'), a
+        real idle-timeout-driven repositioning that reaches home (closed_via='sim_deadhead' -- see
+        real_idle_gap_events() above), or via an ASSUMED empty return once the real order sequence
+        AND the shared sim_end window both run out (closed_via='assumed', revenue=0 for that
+        closing leg since nothing real covers it -- REAL's own gap this whole analysis is meant to
+        price, not exclude). extra_empty_miles is a RUNNING TOTAL across the whole cycle
+        (documents/logs/27 follow-up, direct user correction: "do we actually consider the actual
+        deadheads?") -- every ordinary real deadhead-to-pickup leg between consecutive real trips
+        is priced in as it happens, not just whichever leg happened to close the cycle; a
+        'trip'-closed cycle can still carry real accumulated empty miles from earlier in the same
+        cycle, it is no longer assumed to be 0.
+        hos_remaining_at_return: real, reconstructed from the SAME seeded starting condition
+        TRAINED used (real_hos_logs above) -- None only if this driver's real timestamps didn't
+        support a clean log.
         """
         home_hub = home_hub_of[driver_id]
         hos_log = real_hos_logs.get(driver_id)
         grp = df[df.driver_id == driver_id].sort_values('actual_pickup')
-        cycles, cur = [], {'trips': 0, 'revenue': 0.0, 'start_time': sim_start}
-        last_dest, last_end, prev_dest = home_hub, sim_start, None  # starts at home, at sim_start
+        # Real bug fixed here: Python's built-in hash() on a tuple containing a str is
+        # RANDOMIZED per-process by default (PYTHONHASHSEED) -- hash(('real_idle_timeout', 5))
+        # confirmed to return a DIFFERENT value on two separate `python -m ...` invocations, so
+        # this "deterministic per-driver RNG" was silently reseeding differently every run,
+        # producing real cycle-count drift (763/764/770 seen across otherwise-identical reruns).
+        # A plain int arithmetic seed is immune to hash randomization -- genuinely deterministic.
+        rng = random.Random(driver_id * 1_000_003 + 17)
+        cycles, cur = [], {'trips': 0, 'revenue': 0.0, 'extra_empty_miles': 0.0, 'start_time': sim_start}
+        last_dest, last_end = home_hub, sim_start  # starts at home, at sim_start
+        hours_since_home = 0.0
+
+        def close_idle_events(events: list[dict]) -> None:
+            # Every event's miles count toward the CURRENT cycle's total -- including an
+            # intermediate reposition that lands at the nearest hub (not home) before a LATER
+            # event in the same gap finally reaches home: that intermediate leg really was driven,
+            # so it's real empty running within this cycle, not a leg to silently drop.
+            nonlocal cur, last_end
+            for ev in events:
+                cur['extra_empty_miles'] += ev['miles']
+                if ev['reached_home']:
+                    hos_remaining = hos_log.snapshot(ev['time']).remaining_hours if hos_log else None
+                    duration_hours = (ev['time'] - cur['start_time']).total_seconds() / 3600
+                    cur.update(closed_via='sim_deadhead',
+                               hos_remaining_at_return=hos_remaining, duration_hours=duration_hours)
+                    cycles.append(cur)
+                    cur = {'trips': 0, 'revenue': 0.0, 'extra_empty_miles': 0.0, 'start_time': ev['time']}
+                last_end = ev['time']
+
         for _, row in grp.iterrows():
+            if row.actual_pickup > last_end:
+                events, last_dest, hours_since_home = real_idle_gap_events(
+                    rng, home_hub, hos_log, last_dest, last_end, row.actual_pickup, hours_since_home,
+                )
+                close_idle_events(events)
+            # Real ordinary deadhead (documents/logs/27 follow-up, direct user correction: "do we
+            # actually consider the actual deadheads?") -- previous real position -> this order's
+            # real origin, SAME basis real_hos_log() already uses for the HOS clock, now ALSO
+            # priced into the cycle's own running empty-miles total, not just the special
+            # cycle-CLOSING leg. This was a real, undisclosed gap: an ordinary mid-cycle deadhead
+            # leg (the common case, not the rare closing case) was previously invisible to
+            # "avg empty return miles per cycle" entirely, for both arms.
+            cur['extra_empty_miles'] += get_route(data, last_dest, row.origin_location_id)[0]
             cur['trips'] += 1
             cur['revenue'] += real_order_revenue(row)
             last_dest = row.dest_location_id
@@ -751,52 +896,98 @@ def run_cycle_analysis(model_path: str = 'sim/training/state_value_function.pkl'
             # actually most recent.
             loaded_hours = get_route(data, row.origin_location_id, row.dest_location_id)[1]
             last_end = row.actual_pickup + timedelta(hours=loaded_hours + median_delivery_dwell_h)
-            prev_dest = row.dest_location_id
             if last_dest == home_hub:
+                hours_since_home = 0.0
                 hos_remaining = hos_log.snapshot(last_end).remaining_hours if hos_log else None
                 duration_hours = (last_end - cur['start_time']).total_seconds() / 3600
-                cur.update(closed_via='trip', extra_empty_miles=0.0, hos_remaining_at_return=hos_remaining,
+                cur.update(closed_via='trip', hos_remaining_at_return=hos_remaining,
                            duration_hours=duration_hours)
                 cycles.append(cur)
-                cur = {'trips': 0, 'revenue': 0.0, 'start_time': last_end}
+                cur = {'trips': 0, 'revenue': 0.0, 'extra_empty_miles': 0.0, 'start_time': last_end}
+        if sim_end > last_end:
+            events, last_dest, hours_since_home = real_idle_gap_events(
+                rng, home_hub, hos_log, last_dest, last_end, sim_end, hours_since_home,
+            )
+            close_idle_events(events)
         if last_dest != home_hub:
             hos_remaining = hos_log.snapshot(last_end).remaining_hours if hos_log else None
             duration_hours = (last_end - cur['start_time']).total_seconds() / 3600
-            cur.update(closed_via='assumed', extra_empty_miles=get_route(data, last_dest, home_hub)[0],
-                       hos_remaining_at_return=hos_remaining, duration_hours=duration_hours)
+            cur['extra_empty_miles'] += get_route(data, last_dest, home_hub)[0]
+            cur.update(closed_via='assumed', hos_remaining_at_return=hos_remaining, duration_hours=duration_hours)
             cycles.append(cur)
         return cycles
 
     def trained_cycles(driver_id: int) -> list[dict]:
         """SAME closing rule as real_cycles() -- every cycle closed, either via a real trip
         landing at home, or an assumed empty return once the driver's trip sequence runs out.
-        The middle case (a real, SIMULATED post-completion-deadhead leg that lands the driver at
-        home hub while the window is still running) is also 'trip'-closed here -- extra_empty_miles
-        for it is a real tracked distance (not an assumed one), flagged via closed_via='sim_deadhead'
-        so it isn't conflated with either the free 'trip' case or the window-end 'assumed' case.
+        THREE real mechanisms can close a cycle mid-window without waiting for the window to run
+        out, merged here into ONE chronological timeline (a real bug fixed directly: an earlier
+        version of this function only ever walked trips_by_driver, so it silently missed every
+        relocation the standalone IDLE_TIMEOUT mechanism produced -- confirmed on this exact
+        replay: 32 real repositions/2,260mi were invisible until this fix):
+        1. A real order whose own destination happens to be home (closed_via='trip').
+        2. The immediate post-delivery repositioning branch baked into a trip's own
+           next_location_id (closed_via='sim_deadhead' when it lands at home).
+        3. A standalone IDLE_TIMEOUT/IDLE_REPOSITION_COMPLETE relocation (documents/logs/25-27),
+           tracked separately in idle_repositions_by_driver and merged in by real timestamp.
         """
         home_hub = home_hub_of[driver_id]
         driver_trips = sorted(trips_by_driver.get(driver_id, []), key=lambda c: c.assigned_at)
-        cycles, cur = [], {'trips': 0, 'revenue': 0.0, 'start_time': sim_start}
+        idle_events = sorted(idle_repositions_by_driver.get(driver_id, []), key=lambda ev: ev['time'])
+        timeline = (
+            [('trip', c.next_available_at or c.assigned_at, c) for c in driver_trips]
+            + [('idle', ev['time'], ev) for ev in idle_events]
+        )
+        timeline.sort(key=lambda item: item[1])
+
+        cycles, cur = [], {'trips': 0, 'revenue': 0.0, 'extra_empty_miles': 0.0, 'start_time': sim_start}
         last_loc, last_hos, last_end = home_hub, None, sim_start
-        for c in driver_trips:
-            final_loc = c.next_location_id or c.order.dest_location_id
-            cur['trips'] += 1
-            cur['revenue'] += c.order_revenue
-            last_loc, last_hos, last_end = final_loc, c.next_hos_remaining, c.next_available_at or last_end
-            if final_loc == home_hub:
-                if final_loc == c.order.dest_location_id:
-                    cur.update(closed_via='trip', extra_empty_miles=0.0)
-                else:
-                    real_extra = get_route(data, c.order.dest_location_id, final_loc)[0]
-                    cur.update(closed_via='sim_deadhead', extra_empty_miles=real_extra)
-                cur['hos_remaining_at_return'] = c.next_hos_remaining
-                cur['duration_hours'] = (last_end - cur['start_time']).total_seconds() / 3600
-                cycles.append(cur)
-                cur = {'trips': 0, 'revenue': 0.0, 'start_time': last_end}
+        for kind, t, payload in timeline:
+            if kind == 'trip':
+                c = payload
+                final_loc = c.next_location_id or c.order.dest_location_id
+                # Real ordinary deadhead (documents/logs/27 follow-up, direct user correction: "do
+                # we actually consider the actual deadheads?") -- c.deadhead_miles is this trip's
+                # own real pre-pickup deadhead, already computed by run_assignment(), now ALSO
+                # priced into the cycle's running empty-miles total -- SAME fix as real_cycles()
+                # above, so both arms are measured on the identical basis (previously only the
+                # rare cycle-CLOSING leg was counted, not the common mid-cycle case).
+                cur['extra_empty_miles'] += c.deadhead_miles
+                cur['trips'] += 1
+                cur['revenue'] += c.order_revenue
+                last_loc, last_hos, last_end = final_loc, c.next_hos_remaining, c.next_available_at or last_end
+                if final_loc == home_hub:
+                    if final_loc == c.order.dest_location_id:
+                        cur.update(closed_via='trip')
+                    else:
+                        real_extra = get_route(data, c.order.dest_location_id, final_loc)[0]
+                        cur['extra_empty_miles'] += real_extra
+                        cur.update(closed_via='sim_deadhead')
+                    cur['hos_remaining_at_return'] = c.next_hos_remaining
+                    cur['duration_hours'] = (last_end - cur['start_time']).total_seconds() / 3600
+                    cycles.append(cur)
+                    cur = {'trips': 0, 'revenue': 0.0, 'extra_empty_miles': 0.0, 'start_time': last_end}
+            else:  # kind == 'idle' -- a real IDLE_TIMEOUT relocation, no attached order/revenue
+                ev = payload
+                last_loc, last_end = ev['to_location_id'], ev['time']
+                # Every idle relocation's miles count toward the current cycle's total, whether or
+                # not THIS specific one reaches home -- same reasoning real_idle_gap_events() above
+                # uses for REAL (an intermediate nearest-hub leg still really happened).
+                cur['extra_empty_miles'] += ev['miles']
+                if ev['reached_home']:
+                    # hos_remaining_at_return: no fresh HOS snapshot is attached to an idle event
+                    # (unlike a trip's own next_hos_remaining) -- reusing the most recent known
+                    # real trip figure (last_hos) is the same class of light approximation
+                    # landed_hos already uses elsewhere in this project, flagged here rather than
+                    # silently treated as exact.
+                    cur.update(closed_via='sim_deadhead', hos_remaining_at_return=last_hos,
+                               duration_hours=(last_end - cur['start_time']).total_seconds() / 3600)
+                    cycles.append(cur)
+                    cur = {'trips': 0, 'revenue': 0.0, 'extra_empty_miles': 0.0, 'start_time': last_end}
         if last_loc != home_hub:
-            cur.update(closed_via='assumed', extra_empty_miles=get_route(data, last_loc, home_hub)[0],
-                       hos_remaining_at_return=last_hos, duration_hours=(last_end - cur['start_time']).total_seconds() / 3600)
+            cur['extra_empty_miles'] += get_route(data, last_loc, home_hub)[0]
+            cur.update(closed_via='assumed', hos_remaining_at_return=last_hos,
+                       duration_hours=(last_end - cur['start_time']).total_seconds() / 3600)
             cycles.append(cur)
         return cycles
 
@@ -828,7 +1019,12 @@ def run_cycle_analysis(model_path: str = 'sim/training/state_value_function.pkl'
     print(f'{"":45s} {"REAL":>14s} {"TRAINED":>14s}')
     print(f'{"total cycles (all drivers)":45s} {r_all["n_cycles"]:>14} {t_all["n_cycles"]:>14}')
     print(f'{"  closed by a real paid trip landing at home":45s} {r_all["n_trip_closed"]:>14} {t_all["n_trip_closed"]:>14}')
-    print(f'{"  closed by a real SIMULATED deadhead leg":45s} {"n/a":>14} {t_all["n_sim_deadhead"]:>14}')
+    # Real bug fixed here: this row hardcoded "n/a" for REAL's own count, left over from BEFORE
+    # the idle-timeout fairness fix (documents/logs/27 follow-up) -- REAL genuinely had no
+    # sim_deadhead closures back then. It does now (real_idle_gap_events()), and summarize()
+    # was already computing r_all['n_sim_deadhead'] correctly -- this line just never printed it,
+    # making REAL's own row arithmetic (trip + assumed != total) look broken when it wasn't.
+    print(f'{"  closed by a real idle-timeout-driven leg":45s} {r_all["n_sim_deadhead"]:>14} {t_all["n_sim_deadhead"]:>14}')
     print(f'{"  closed by an ASSUMED empty return (no trip)":45s} {r_all["n_assumed"]:>14} {t_all["n_assumed"]:>14}')
 
     print(f'\n=== Per-cycle averages, ALL cycles (nothing excluded) ===')
@@ -841,35 +1037,55 @@ def run_cycle_analysis(model_path: str = 'sim/training/state_value_function.pkl'
     print(f'{"avg HOS remaining at return (hrs)":45s} {r_hos_str:>14s} {t_hos_str:>14s}')
     print(f'{"avg cycle duration (calendar hrs)":45s} {r_all["avg_duration_hours"]:>14,.1f} {t_all["avg_duration_hours"]:>14,.1f}')
     if r_all["avg_hos_remaining"] is not None and t_all["avg_hos_remaining"] is not None:
-        uncharged_diff = r_all["avg_hos_remaining"] - t_all["avg_hos_remaining"]
+        # Direction computed from the ACTUAL numbers each run produces, not assumed -- an earlier
+        # version of this narrative hardcoded a fixed direction ("TRAINED has more") from one past
+        # run and printed it unconditionally regardless of which way a later run's own numbers
+        # actually pointed, a real self-contradiction risk. who_more/who_shorter/who_trips below
+        # are picked from the SAME r_all/t_all figures already printed above them.
+        hos_diff = t_all["avg_hos_remaining"] - r_all["avg_hos_remaining"]
         duration_diff = t_all["avg_duration_hours"] - r_all["avg_duration_hours"]
+        trip_diff = t_all["avg_trips"] - r_all["avg_trips"]
+        who_more_hos = 'TRAINED' if hos_diff > 0 else 'REAL'
+        who_shorter = 'TRAINED' if duration_diff < 0 else 'REAL'
+        who_more_trips = 'TRAINED' if trip_diff > 0 else 'REAL'
         print(f'\n"HOS remaining at return" = legal driving/duty hours still available but UNUSED once the '
               f'driver is back home -- real, forgone capacity, reconstructed for REAL from the SAME seeded '
               f'starting HOS condition TRAINED\'s own simulated fleet used (initialize_fleet(), seed=1), then '
               f'walked forward through REAL\'s own actual_pickup/actual_delivery timestamps -- not an assumption '
-              f'about REAL, a real reconstruction from real data. TRAINED returns home with {abs(uncharged_diff):.1f} '
-              f'more hours left unused per cycle than REAL -- checked directly, not left unexplained: my first guess '
-              f'was that TRAINED\'s cycles simply span more calendar time, letting the rolling 7-day/14-day windows '
-              f'age off more hours regardless of work done -- WRONG DIRECTION, checked and rejected: TRAINED\'s '
-              f'cycles actually run {abs(duration_diff):,.0f} FEWER calendar hours on average '
-              f'({t_all["avg_duration_hours"]:,.0f}h vs {r_all["avg_duration_hours"]:,.0f}h), not more. So TRAINED is '
-              f'doing MORE trips and MORE revenue, in LESS calendar time, while ALSO preserving more legal HOS '
-              f'margin -- consistent with (not proof of, but consistent with) the earlier finding that a third of '
-              f'TRAINED\'s pickups have zero deadhead: genuinely tighter, less wasteful trip selection, not a '
-              f'rolling-window artifact.')
+              f'about REAL, a real reconstruction from real data. {who_more_hos} returns home with '
+              f'{abs(hos_diff):.1f} more hours left unused per cycle than the other side. {who_shorter}\'s cycles '
+              f'run {abs(duration_diff):,.0f} calendar hours shorter on average '
+              f'({t_all["avg_duration_hours"]:,.0f}h TRAINED vs {r_all["avg_duration_hours"]:,.0f}h REAL), and '
+              f'{who_more_trips} averages {abs(trip_diff):.1f} more trips per cycle '
+              f'({t_all["avg_trips"]:.1f} TRAINED vs {r_all["avg_trips"]:.1f} REAL) -- reported directly from this '
+              f'run\'s own numbers, not assumed from a prior run\'s direction.')
     if n_real_hos_skipped:
         print(f'\n({n_real_hos_skipped}/{len(real_driver_ids)} REAL drivers skipped for the HOS reconstruction -- '
               f'their real timestamps had an internal overlap/ordering issue that would have broken a clean, '
               f'non-overlapping duty log; excluded rather than guessed at.)')
-    print(f'\n({r_all["n_assumed"]}/{r_all["n_cycles"]} REAL cycles ({r_all["n_assumed"]/max(r_all["n_cycles"],1):.0%}) needed an '
-          f'ASSUMED empty return -- REAL structurally can never show fewer than this, since it has no '
-          f'record of an empty-only leg at all. TRAINED needed one for {t_all["n_assumed"]}/{t_all["n_cycles"]} '
-          f'({t_all["n_assumed"]/max(t_all["n_cycles"],1):.0%}), plus {t_all["n_sim_deadhead"]} more genuinely '
-          f'SIMULATED empty legs (a real, priced distance, not an assumption) -- both counted in the '
-          f'empty-miles average above, tagged separately so they are not confused with each other.)')
+    print(f'\nOf REAL\'s {r_all["n_cycles"]} cycles: {r_all["n_trip_closed"]} closed via a real paid delivery '
+          f'landing at home (an actual, observed fact), {r_all["n_sim_deadhead"]} closed via the idle-timeout '
+          f'fairness check (documents/logs/27 follow-up) deciding REAL would have repositioned -- NOT observed '
+          f'in ground_truth.historical_orders, which has zero recorded empty-only legs; this is our own '
+          f'repositioning_outcome() decision applied to REAL\'s reconstructed idle gaps, same as it is for '
+          f'TRAINED -- and only {r_all["n_assumed"]} ({r_all["n_assumed"]/max(r_all["n_cycles"],1):.0%}) needed '
+          f'a plain ASSUMED empty return (the shared window truly ran out before any decision point). Of '
+          f'TRAINED\'s {t_all["n_cycles"]}: {t_all["n_trip_closed"]} trip-closed, {t_all["n_sim_deadhead"]} '
+          f'idle-timeout/post-delivery-closed (also not a historical fact -- a real, priced simulated distance), '
+          f'{t_all["n_assumed"]} ({t_all["n_assumed"]/max(t_all["n_cycles"],1):.0%}) assumed. All three counted '
+          f'in the empty-miles average above, tagged separately so they are not confused with each other.)')
 
     print(f'\n=== By home hub ===')
-    for hub_name, hub_id in data.hub_ids.items():
+    # Real bug fixed here: iterating only data.hub_ids (the nearest-hub routing set, just
+    # {London, Milton}) silently dropped any driver whose REAL home hub is one of the other real
+    # anchor locations calibration.driver_home_hub can point to (Barrie, Niagara Falls, ...) --
+    # confirmed directly against this actual 42-driver pool: 7 of them home to Barrie
+    # (location_id 5719), never shown in this breakdown before. Iterate the ACTUAL distinct home
+    # hubs this driver set uses instead, resolving a real name where data.hub_ids has one and
+    # falling back to the location_id (not silently dropping the driver) where it doesn't.
+    inv_hub_ids = {v: k for k, v in data.hub_ids.items()}
+    for hub_id in sorted(set(home_hub_of.values())):
+        hub_name = inv_hub_ids.get(hub_id, f'hub #{hub_id}')
         hub_drivers = [d for d in real_driver_ids if home_hub_of[d] == hub_id]
         if not hub_drivers:
             continue

@@ -52,10 +52,11 @@ from datetime import datetime, timedelta
 from psycopg2.extras import Json, execute_values
 
 from sim.config import (
-    ASSUMED_CAPACITY_VALUE_RATE_PER_LB, ASSUMED_LTL_RATE_MULTIPLIER, ASSUMED_PROMISE_BUFFER_HOURS,
-    CAPACITY_BY_LOAD_TYPE, CAPACITY_PALLETS_BY_LOAD_TYPE, DISPATCH_DECISION_CUTOFF_HOURS, EPSILON_END,
-    EPSILON_START, HOS_MIN_DAILY_OFF_DUTY_HOURS, MAINTENANCE_DOWNTIME_DAYS, OSRM_BASE_URL, P_LTL_ORDER,
-    linehaul_rate_per_mile,
+    ASSUMED_CAPACITY_VALUE_RATE_PER_LB, ASSUMED_CYCLE_STRANDING_PENALTY_CAD_MAX, ASSUMED_LTL_RATE_MULTIPLIER,
+    ASSUMED_OPERATING_COST_PER_MILE, ASSUMED_PROMISE_BUFFER_HOURS, CAPACITY_BY_LOAD_TYPE,
+    CAPACITY_PALLETS_BY_LOAD_TYPE, DISPATCH_DECISION_CUTOFF_HOURS, EPSILON_END, EPSILON_START,
+    HOME_URGENCY_REPOSITION_THRESHOLD, HOS_MIN_DAILY_OFF_DUTY_HOURS, MAINTENANCE_DOWNTIME_DAYS,
+    OSRM_BASE_URL, P_LTL_ORDER, linehaul_rate_per_mile,
 )
 from sim.db import cursor
 from sim.engine.hos import DRIVING, OFF_DUTY, ON_DUTY_NOT_DRIVING, HOSLog
@@ -63,7 +64,8 @@ from sim.engine.maintenance import initialize_fleet as initialize_fleet_maintena
 from sim.engine.maintenance import sample_repair_hours
 from sim.engine.policy import Candidate, choose_assignment, rank_candidates, zero_value_fn
 from sim.engine.reward import (
-    compute_reward, late_delivery_penalty, load_fill_ratio, post_delivery_deadhead_cost, realized_breakdown_penalty,
+    combined_home_urgency, compute_reward, late_delivery_penalty, load_fill_ratio, post_delivery_deadhead_cost,
+    realized_breakdown_penalty,
 )
 from sim.engine.state import TRANSITION_PRIORS, TripState, TripStatus
 
@@ -104,6 +106,7 @@ class SimData:
     order_pool: list[tuple[float, float, str]]          # bootstrap pool: (weight_lbs, pallets, load_type)
     driver_ids: list[int]
     driver_terminal_zone: dict[int, str | None]
+    driver_home_hub: dict[int, int]  # driver_id -> location_id, calibration.driver_home_hub (sim/sql/045, sim/calibrate_driver_home_hub.py)
     truck_numbers: list[str]
     driver_default_truck: dict[int, str]  # real DEFAULT_PUNIT, 18/131 drivers -- ground_truth.driver_equipment
     origin_density: dict[int, float]      # location_id -> total real lane_frequency weight originating there
@@ -159,6 +162,13 @@ def load_sim_data() -> SimData:
         driver_ids = [r[0] for r in driver_rows]
         driver_terminal_zone = dict(driver_rows)
 
+        # Real user feedback: terminal_zone above is nearly blank (130/131 drivers report the
+        # same generic company code) -- driver_home_hub_id() below reads THIS table instead, a
+        # real historical-leg-derived anchor for the drivers who have one, a real-data-informed
+        # ASSUMED one for the rest (sim/calibrate_driver_home_hub.py, sim/sql/045).
+        cur.execute("select driver_id, hub_location_id from calibration.driver_home_hub")
+        driver_home_hub = dict(cur.fetchall())
+
         cur.execute("select truck_number from ground_truth.trucks")
         truck_numbers = [r[0] for r in cur.fetchall()]
 
@@ -181,7 +191,7 @@ def load_sim_data() -> SimData:
         hub_ids=hub_ids, lane_weights=lane_weights, lane_routes=lane_routes,
         order_arrival_rate=order_arrival_rate, dwell_minutes=dwell_minutes,
         hos_median_remaining_hours=hos_median_remaining_hours, order_pool=order_pool,
-        driver_ids=driver_ids, driver_terminal_zone=driver_terminal_zone, truck_numbers=truck_numbers,
+        driver_ids=driver_ids, driver_terminal_zone=driver_terminal_zone, driver_home_hub=driver_home_hub, truck_numbers=truck_numbers,
         driver_default_truck=driver_default_truck, origin_density=origin_density,
         lead_time_samples=lead_time_samples,
     )
@@ -258,17 +268,26 @@ def get_route(data: SimData, origin_id: int, dest_id: int) -> tuple[float, float
 
 
 def driver_home_hub_id(data: SimData, driver_id: int) -> int:
-    """This driver's OWN home terminal location_id -- NOT the nearest-any-hub used elsewhere
+    """This driver's OWN home-base location_id -- NOT the nearest-any-hub used elsewhere
     (Order.dest_distance_to_hub_km, dynamic_post_completion_probs) -- see
     documents/logs/23_home_base_return_gap_found.md: a Milton driver landing near London hub is
-    not "home." Factored out of initialize_fleet()'s own zone->hub resolution (below) so the
-    home-base-return reward-shaping features (candidate-building loop) use the EXACT same
-    driver->hub mapping the sim used to place this driver at simulation start, not a second,
-    possibly-drifting copy of the same logic.
+    not "home." Factored out of initialize_fleet()'s own placement logic so the home-base-return
+    reward-shaping features (candidate-building loop) use the EXACT same driver->hub mapping the
+    sim used to place this driver at simulation start, not a second, possibly-drifting copy.
+
+    Real user feedback + real gap found directly: ground_truth.drivers.terminal_zone is nearly
+    blank (130/131 drivers report the same generic company code, not a real per-driver location)
+    -- the OLD version of this function fell back on it, collapsing the entire fleet onto ONE home
+    hub (London). Reads calibration.driver_home_hub instead (sim/calibrate_driver_home_hub.py,
+    sim/sql/045): a real historical-leg-derived anchor for the drivers who have enough real trip
+    history to infer one from, a real-data-informed ASSUMED one (from 4 real anchor points --
+    London/Milton's real terminals plus Barrie/Niagara Falls, the brief's other 2 coverage cities,
+    via a real customer location in each) for the rest. Falls back to the London hub only if a
+    driver is somehow missing from that table entirely (should not happen -- every real driver_id
+    got a row -- but never silently KeyErrors a live scoring call over it).
     """
-    zone = data.driver_terminal_zone.get(driver_id)
-    hub = 'Milton' if zone == 'ONMIL' else 'London'  # RSTAR / null -> London, the primary hub
-    return data.hub_ids[hub]
+    hub_id = data.driver_home_hub.get(driver_id)
+    return hub_id if hub_id is not None else data.hub_ids['London']
 
 
 EXTENDED_DWELL_PROBABILITY = 0.015  # SYNTHESIZED -- see sample_dwell_hours(). ~5-8 real cases in
@@ -334,6 +353,56 @@ def dynamic_post_completion_probs(dist_to_hub_km: float) -> tuple[float, float, 
 
     remaining = 1 - p_deadhead
     return remaining * reload_share, p_deadhead, remaining * (1 - reload_share)
+
+
+def repositioning_outcome(
+    current_location_id: int, home_hub_id: int, nearest_hub_id: int, dist_to_hub_km: float,
+    remaining_cycle_hours: float, hours_since_home: float | None, hours_to_home: float, rng: random.Random,
+) -> tuple[str, int]:
+    """The real "what does this driver/truck do next" decision, shared by TWO real call sites
+    (documents/logs/25-26) -- ONE function, not a second implementation for each:
+
+    1. `run_assignment()`'s immediate post-delivery moment (right after every trip).
+    2. The later `IDLE_TIMEOUT` re-check (`run_simulation()`'s event loop) -- re-run with FRESH
+       real current inputs if a driver is STILL uncommitted a real wait later, not a separate
+       hardcoded "give up and go home" branch. Real user correction: a real dispatcher's default
+       (absent an actual reason) is to reposition toward FREIGHT OPPORTUNITY (the nearest hub),
+       not straight to a driver's personal home base -- only once real urgency (legal cycle margin,
+       or a genuine business "been too long since home" cadence) actually justifies it does the
+       target become home specifically, and even then it's a smoothly rising bias, not a hard
+       switch -- see `combined_home_urgency()`.
+
+    Returns (outcome, target_location_id): outcome is 'reload' (stays exactly where they are,
+    ready), 'reposition' (drives to target_location_id -- the nearest hub, or home once urgent),
+    or 'dromt' (drops trailer, stays local). Caller applies whatever real bookkeeping (TripStatus
+    transitions for a live trip, or direct HOS-log/location mutation for an idle re-check) its own
+    context needs -- this function only ever decides WHICH of the three, never executes it.
+    """
+    p_reload, p_deadhead, p_dromt = dynamic_post_completion_probs(dist_to_hub_km)
+    target_hub_id = nearest_hub_id
+    if current_location_id != home_hub_id and hours_since_home is not None:
+        urgency = combined_home_urgency(remaining_cycle_hours, hours_since_home, hours_to_home)
+        if urgency >= HOME_URGENCY_REPOSITION_THRESHOLD:
+            target_hub_id = home_hub_id
+            # Blend p_deadhead up toward 1 as urgency approaches 1, shrinking p_reload/p_dromt
+            # proportionally -- always sums to 1, and low-urgency behavior (the vast majority of
+            # cases) is completely unchanged since this whole block only runs above threshold.
+            p_deadhead = p_deadhead + urgency * (1 - p_deadhead)
+            remaining_prob = 1 - p_deadhead
+            other_total = p_reload + p_dromt
+            if other_total > 0:
+                p_reload = p_reload / other_total * remaining_prob
+                p_dromt = p_dromt / other_total * remaining_prob
+            else:
+                p_reload, p_dromt = remaining_prob, 0.0
+
+    roll = rng.random()
+    if roll < p_reload:
+        return 'reload', current_location_id
+    elif roll < p_reload + p_deadhead:
+        return 'reposition', target_hub_id
+    else:
+        return 'dromt', current_location_id
 
 
 # --------------------------------------------------------------------------------------------
@@ -437,6 +506,12 @@ class DriverState:
     committed_until: datetime | None = None
     committed_location_id: int | None = None
     committed_truck_number: str | None = None
+    # Home-time retarget (documents/logs/25): the real last moment this driver was AT their home
+    # hub -- updated synchronously in the TRIP_COMPLETE handler below, so it's always correct as
+    # of `now` by the time any DISPATCH_DECISION reads it (the sim's strictly causal event loop
+    # means no chain-walk/projection is needed here, unlike live's project_driver_state() -- see
+    # that function's own docstring for why live genuinely needs one and this doesn't).
+    last_home_at: datetime | None = None
 
 
 @dataclass
@@ -556,7 +631,9 @@ def initialize_fleet(sim_data: SimData, rng: random.Random, sim_start: datetime)
         hos_log.add(prior_start, prior_start + timedelta(hours=used_cycle_hours), ON_DUTY_NOT_DRIVING)
         hos_log.add(sim_start - timedelta(hours=10), sim_start, OFF_DUTY)  # the qualifying daily reset
 
-        drivers[driver_id] = DriverState(driver_id=driver_id, hos_log=hos_log, location_id=location_id)
+        # Every driver starts AT their home hub (location_id above) -- last_home_at = sim_start is
+        # simply the truth, not an assumption (documents/logs/25).
+        drivers[driver_id] = DriverState(driver_id=driver_id, hos_log=hos_log, location_id=location_id, last_home_at=sim_start)
 
     # Trucks need a starting location too. Placed at whichever driver's hub first claims them
     # from their pool -- guarantees every driver starts with at least one co-located, available
@@ -624,6 +701,21 @@ class CompletedTrip:
     distance_to_home_miles_landing: float = 0.0
     home_progress_bonus: float = 0.0
     cycle_end_stranding_penalty: float = 0.0
+    # Home-time retarget (documents/logs/25-26): the business-cadence companion to
+    # distance_to_home_miles above, persisted so V(s) can see the EXACT signal
+    # combined_home_urgency()'s business half is shaped around, not just its indirect effect on
+    # realized rewards (a real gap this closes -- see documents/logs/26's own "model can't see the
+    # signal" finding). hours_since_home_landing mirrors reward.py's compute_reward() internal
+    # estimate exactly (0.0 once landing AT home, else hours_since_home + planned_duty_hours) --
+    # same reasoning distance_to_home_miles_landing already establishes for its own next-state role.
+    hours_since_home: float | None = None
+    hours_since_home_landing: float | None = None
+    # Home-time retarget, the real "don't leave a driver idle" event (documents/logs/25-26): set
+    # by the IDLE_TIMEOUT handler below, retroactively, on whichever CompletedTrip left this
+    # driver in the idle state that led to it -- a REAL, priced consequence of THIS decision, not
+    # a soft shaping term, so Fitted Value Iteration sees it as a real cost in the training data.
+    idle_then_drove_home_miles: float = 0.0        # real empty miles actually driven home after sitting idle too long
+    idle_then_stranded_penalty: float = 0.0         # charged instead, when they legally couldn't make the full drive (see IDLE_TIMEOUT handler)
     # Next-state, for Fitted Value Iteration -- set by the caller (run_simulation()) after this
     # trip's HOS interval is logged, not here (this function doesn't have the updated hos_log).
     next_location_id: int | None = None
@@ -738,19 +830,50 @@ def run_assignment(
         data.hub_ids.values(),
         key=lambda hid: _haversine_km(data.locations[order.dest_location_id], data.locations[hid]),
     )
-    p_reload, p_deadhead, p_dromt = dynamic_post_completion_probs(order.dest_distance_to_hub_km)
 
-    roll = rng.random()
+    # Home-time retarget (documents/logs/25-26): the real, costed simulated event this whole
+    # mechanism exists to add, decided by the SAME `repositioning_outcome()` used by the
+    # IDLE_TIMEOUT re-check below (one real decision function, not two parallel implementations).
+    # When this driver's combined home urgency (legal cycle margin OR business days-since-home,
+    # see reward.py's combined_home_urgency()) is high, the reposition target becomes their OWN
+    # home hub, not the generic nearest one, and they become MORE likely to reposition at all --
+    # blended in smoothly via urgency, not a hard switch, so training data shows the real range
+    # from "no pull" to "strongly pulled home" rather than a step function.
+    # candidate.hos_state/hours_since_home are DECISION-TIME figures (this function has no access
+    # to the live-updated hos_log/fleet -- only run_simulation()'s caller does); the SAME light
+    # estimate reward.py's own home_progress_bonus already uses for a landing state (current
+    # figure minus this trip's own planned duty hours) is reused here for consistency, not a
+    # separate, second approximation.
+    home_hub_id = driver_home_hub_id(data, driver_id)
+    remaining_cycle_at_completion = max(
+        0.0, min(candidate.hos_state.remaining_cycle1_hours, candidate.hos_state.remaining_cycle2_hours)
+        - candidate.planned_duty_hours,
+    )
+    # Mirrors reward.py's compute_reward() internal hours_since_home_landing estimate exactly:
+    # 0.0 once landing AT home (order.dest_location_id == home_hub_id), else the light
+    # current-plus-this-trip's-duty estimate -- same reasoning distance_to_home_miles_landing
+    # already establishes for its own next-state role.
+    hours_since_home_at_completion = None
+    if candidate.hours_since_home is not None:
+        hours_since_home_at_completion = (
+            0.0 if order.dest_location_id == home_hub_id
+            else candidate.hours_since_home + candidate.planned_duty_hours
+        )
+    outcome, target_location_id = repositioning_outcome(
+        order.dest_location_id, home_hub_id, nearest_hub_id, order.dest_distance_to_hub_km,
+        remaining_cycle_at_completion, hours_since_home_at_completion, candidate.hours_to_home_landing or 0.0, rng,
+    )
+
     final_location_id = order.dest_location_id
-    if roll < p_reload:
+    if outcome == 'reload':
         pass  # no transition needed -- rig is simply available here, at t
-    elif roll < p_reload + p_deadhead:
-        dh_miles, dh_hours = get_route(data, order.dest_location_id, nearest_hub_id)
+    elif outcome == 'reposition':
+        dh_miles, dh_hours = get_route(data, order.dest_location_id, target_location_id)
         trip.transition(TripStatus.DISP, t, loaded=False, distance_miles=dh_miles)
         t += timedelta(hours=dh_hours)
         trip.transition(TripStatus.ARRSHIP, t)  # arrives back at the hub, ready for the next pickup
-        final_location_id = nearest_hub_id
-    else:
+        final_location_id = target_location_id
+    else:  # 'dromt'
         trip.transition(TripStatus.DROMT, t)  # empty trailer dropped, staying local
 
     # Captured BEFORE after_trip() advances the odometer/calendar -- decision-time state.
@@ -803,6 +926,7 @@ def run_assignment(
         lateness_penalty=lateness_penalty,
         distance_to_home_miles=candidate.distance_to_home_miles or 0.0,
         distance_to_home_miles_landing=candidate.distance_to_home_miles_landing or 0.0,
+        hours_since_home=candidate.hours_since_home, hours_since_home_landing=hours_since_home_at_completion,
         home_progress_bonus=reward.home_progress_bonus,
         cycle_end_stranding_penalty=reward.cycle_end_stranding_penalty,
         total_committed_distance_miles=deadhead_miles + order.loaded_miles,
@@ -916,6 +1040,15 @@ def run_simulation(
     completed_trips: list[CompletedTrip] = []
     unassigned_orders = 0
     unassigned_order_ids: list[uuid.UUID] = []  # documents/logs/19 -- lets a caller identify WHICH orders had no feasible candidate, not just the count
+    # Real IDLE_TIMEOUT/IDLE_REPOSITION_COMPLETE outcomes (documents/logs/25-27) -- this mechanism
+    # mutates fleet.drivers[...].location_id directly, OUTSIDE of any CompletedTrip's own
+    # next_location_id, so a caller walking completed_trips alone (e.g. real_data_replay.py's
+    # cycle analysis) would never see these real relocations at all -- confirmed directly: a real
+    # backtest replay showed 32 real IDLE_TIMEOUT repositions/2,260mi that the cycle-analysis
+    # script's own bookkeeping silently missed. Logged explicitly here so any caller that needs
+    # the real driver-position timeline (not just the aggregate reward effect already folded into
+    # the preceding trip's reward_total) has a real, structured record to walk.
+    idle_repositions: list[dict] = []
 
     while events:
         now, _, kind, payload = heapq.heappop(events)
@@ -928,7 +1061,7 @@ def run_simulation(
         # ORDER_ARRIVAL/DISPATCH_DECISION can be popped BEFORE an earlier-time TRIP_COMPLETE that
         # was already scheduled from an in-progress trip; `break`ing here would wrongly discard
         # that still-pending real completion instead of draining down to it.
-        if now > sim_end and kind != 'TRIP_COMPLETE':
+        if now > sim_end and kind not in ('TRIP_COMPLETE', 'IDLE_REPOSITION_COMPLETE'):
             continue
 
         if kind == 'ORDER_ARRIVAL':
@@ -977,6 +1110,12 @@ def run_simulation(
                 if home_hub_id not in home_hub_landing_cache:
                     home_hub_landing_cache[home_hub_id] = get_route(data, order.dest_location_id, home_hub_id)
                 home_miles_landing, home_hours_landing = home_hub_landing_cache[home_hub_id]
+                # Home-time retarget (documents/logs/25): real hours since this driver was last AT
+                # home, as of THIS candidate's own effective_start -- last_home_at is always
+                # correct as of `now` (see DriverState's own comment), and eff_start >= now, so this
+                # is a real, not-yet-elapsed-at-decision-time projection, the same treatment
+                # eff_start already gets for every other feature here.
+                hours_since_home = max(0.0, (eff_start - drv.last_home_at).total_seconds() / 3600)
 
                 cand = Candidate(
                     driver_id=driver_id, truck_number=eff_truck_number, hos_state=hos_state,
@@ -985,6 +1124,7 @@ def run_simulation(
                     pre_pickup_deadhead_hours=dh_hours, effective_start=eff_start,
                     distance_to_home_miles=home_miles_now, distance_to_home_miles_landing=home_miles_landing,
                     hours_to_home_current=home_hours_now, hours_to_home_landing=home_hours_landing,
+                    hours_since_home=hours_since_home,
                 )
                 candidates.append(cand)
                 truck_by_driver[driver_id] = eff_truck_number
@@ -1131,12 +1271,141 @@ def run_simulation(
                 fleet.drivers[driver_id].location_id = final_location_id
                 fleet.trucks[truck_number].available = True
                 fleet.trucks[truck_number].location_id = final_location_id
+                # Home-time retarget (documents/logs/25): a real cycle closing at home, tracked as
+                # it actually happens -- not inferred after the fact the way fleet_metrics.py's
+                # analysis-only cycle detection has to for persisted/reloaded data.
+                if final_location_id == driver_home_hub_id(data, driver_id):
+                    fleet.drivers[driver_id].last_home_at = now
+                # Home-time retarget (documents/logs/25-26): "don't stay idle" -- a driver isn't
+                # left free forever with zero consequence if nothing ever claims them. A real
+                # follow-up check, at the same 24h horizon real dispatch decisions already use (not
+                # a new number, and not a dynamically-computed "safe deadline" -- propose a
+                # reasonable, grounded default, then validate it with real data, same as every
+                # other synthesized constant in this project). `completed` is the SAME object
+                # already appended to completed_trips above -- IDLE_TIMEOUT mutates it directly so
+                # whatever real cost this driver's idle stretch turns out to cost lands back on
+                # the decision that actually caused it. This check RESCHEDULES itself (below) as
+                # long as the driver is still genuinely uncommitted -- it's not a one-shot deadline.
+                heapq.heappush(
+                    events,
+                    (now + timedelta(hours=DISPATCH_DECISION_CUTOFF_HOURS), next(counter), 'IDLE_TIMEOUT',
+                     (driver_id, truck_number, completed)),
+                )
+
+        elif kind == 'IDLE_TIMEOUT':
+            driver_id, truck_number, preceding_trip = payload
+            drv = fleet.drivers[driver_id]
+            home_hub_id = driver_home_hub_id(data, driver_id)
+            still_idle = drv.committed_until is None or drv.committed_until <= now
+            if still_idle and drv.location_id != home_hub_id:
+                # Real idle-gap qualifying rest FIRST (apply_idle_reset -- the same real mechanism
+                # every other idle gap in this sim gets credited with), so both the urgency figure
+                # and the feasibility check below reflect a genuinely rested driver, not a stale,
+                # artificially-tired one.
+                apply_idle_reset(drv.hos_log, now)
+                hos_state = drv.hos_log.snapshot(now)
+                hours_since_home = max(0.0, (now - drv.last_home_at).total_seconds() / 3600)
+                nearest_hub_id = min(
+                    data.hub_ids.values(),
+                    key=lambda hid: _haversine_km(data.locations[drv.location_id], data.locations[hid]),
+                )
+                dist_to_hub_km = _haversine_km(data.locations[drv.location_id], data.locations[nearest_hub_id])
+                _, hours_to_home = get_route(data, drv.location_id, home_hub_id)
+                # SAME decision function `run_assignment()`'s post-delivery moment uses, re-run with
+                # FRESH current inputs -- not a separate, bespoke "give up and go home" branch (the
+                # design this replaces). A genuinely idle driver defaults to repositioning toward
+                # freight OPPORTUNITY (the nearest hub) exactly like a real dispatcher would, absent
+                # an actual reason (elevated legal or business urgency) to send them home instead --
+                # `repositioning_outcome()` is what decides which, using the SAME urgency ramp.
+                outcome, target_location_id = repositioning_outcome(
+                    drv.location_id, home_hub_id, nearest_hub_id, dist_to_hub_km,
+                    min(hos_state.remaining_cycle1_hours, hos_state.remaining_cycle2_hours),
+                    hours_since_home, hours_to_home, rng,
+                )
+                if outcome == 'reposition':
+                    dh_miles, dh_hours = get_route(data, drv.location_id, target_location_id)
+                    if hos_state.can_perform(dh_hours, dh_hours):
+                        # Legally can make the full drive -- do it for real, same bookkeeping any
+                        # other real driving leg gets. Logged NOW (same pattern run_assignment()
+                        # uses) but location_id/last_home_at are only finalized when the drive
+                        # actually FINISHES (IDLE_REPOSITION_COMPLETE below) -- committed_until is
+                        # what makes this driver correctly unavailable/projectable-from-target in
+                        # the meantime, exactly like a real trip commitment. Updating location_id
+                        # immediately here (the bug this replaces) let a DISPATCH_DECISION firing
+                        # mid-drive treat the driver as already free NOW at the target, while
+                        # hos_log already had the drive logged through a LATER time -- a genuine
+                        # causality violation (HOSLog.add() correctly rejects the overlap).
+                        drv.hos_log.add(now, now + timedelta(hours=dh_hours), DRIVING)
+                        driving_end = now + timedelta(hours=dh_hours)
+                        drv.committed_until = driving_end
+                        drv.committed_location_id = target_location_id
+                        drv.committed_truck_number = truck_number
+                        fleet.trucks[truck_number].available = False
+                        idle_cost = dh_miles * ASSUMED_OPERATING_COST_PER_MILE
+                        preceding_trip.idle_then_drove_home_miles = dh_miles
+                        preceding_trip.reward_total -= idle_cost
+                        heapq.heappush(
+                            events,
+                            (driving_end, next(counter), 'IDLE_REPOSITION_COMPLETE',
+                             (driver_id, truck_number, drv.location_id, target_location_id, dh_miles, driving_end)),
+                        )
+                    else:
+                        # Genuinely can't legally make even this drive after a real rest -- the
+                        # "Automated HOS Compliance" rule this whole project holds to means this
+                        # never gets forced through as an illegal drive. FLAGGED SIMPLIFICATION:
+                        # doesn't attempt to model exactly how far they DID get (would need
+                        # route-interpolation machinery this event doesn't have) -- they stay put,
+                        # genuinely stuck, and this is priced as the real, larger stranding outcome
+                        # it is (same cap cycle_end_stranding_penalty already uses elsewhere), not
+                        # silently ignored.
+                        preceding_trip.idle_then_stranded_penalty = ASSUMED_CYCLE_STRANDING_PENALTY_CAD_MAX
+                        preceding_trip.reward_total -= ASSUMED_CYCLE_STRANDING_PENALTY_CAD_MAX
+                else:
+                    # Still genuinely idle (the roll came up 'reload'/'dromt' -- no real reason yet
+                    # to move) -- check again in another 24h rather than silently giving up after
+                    # one look, same real follow-up cadence, looped for as long as nothing claims
+                    # this driver. Bounded by sim_end same as every other event (the top-of-loop
+                    # `now > sim_end` guard drops it once the run is over).
+                    heapq.heappush(
+                        events,
+                        (now + timedelta(hours=DISPATCH_DECISION_CUTOFF_HOURS), next(counter), 'IDLE_TIMEOUT',
+                         (driver_id, truck_number, preceding_trip)),
+                    )
+
+        elif kind == 'IDLE_REPOSITION_COMPLETE':
+            # Finalizes an idle-timeout repositioning drive (scheduled above) at the real time it
+            # actually finishes -- same guard pattern TRIP_COMPLETE uses: only apply if nothing
+            # newer (a real order this driver got assigned to mid-drive) has since superseded this
+            # commitment. If superseded, the hos_log entry/cost already charged stays valid (the
+            # drive really happened); only the final location/availability bookkeeping is skipped
+            # here, since the newer commitment's own completion event owns that now.
+            driver_id, truck_number, source_location_id, target_location_id, dh_miles, driving_end = payload
+            if fleet.drivers[driver_id].committed_until == driving_end:
+                fleet.drivers[driver_id].location_id = target_location_id
+                fleet.drivers[driver_id].committed_until = None
+                fleet.drivers[driver_id].committed_location_id = None
+                fleet.drivers[driver_id].committed_truck_number = None
+                reached_home = target_location_id == driver_home_hub_id(data, driver_id)
+                if reached_home:
+                    fleet.drivers[driver_id].last_home_at = driving_end
+                fleet.trucks[truck_number].available = True
+                fleet.trucks[truck_number].location_id = target_location_id
+                # Real, structured record of this relocation (see idle_repositions' own comment
+                # above) -- only logged once it actually completes un-superseded, matching every
+                # other real outcome this loop records.
+                idle_repositions.append({
+                    'driver_id': driver_id, 'time': driving_end, 'from_location_id': source_location_id,
+                    'to_location_id': target_location_id, 'miles': dh_miles, 'reached_home': reached_home,
+                })
 
     return {
         'sim_id': sim_id, 'seed': seed, 'epsilon_start': epsilon_start, 'epsilon_end': epsilon_end, 'hours': hours,
         'sim_start': sim_start, 'completed_trips': completed_trips, 'unassigned_orders': unassigned_orders,
         'unassigned_order_ids': unassigned_order_ids, 'candidate_score_rows': candidate_score_rows,
         'value_augmented_candidate_score_rows': value_augmented_candidate_score_rows,
+        # Real IDLE_TIMEOUT/IDLE_REPOSITION_COMPLETE relocations -- see idle_repositions' own
+        # comment above. Empty list, not missing, when the mechanism never fired this run.
+        'idle_repositions': idle_repositions,
         # Final fleet state (every driver/truck, not just ones with a completed trip this run) --
         # e.g. the Simulation Showcase's end-of-week truck_maintenance_state table needs EVERY
         # demo truck's final health, including ones that never got dispatched.
@@ -1187,6 +1456,8 @@ def save_run(result: dict) -> None:
                 # Home-base-return retarget (documents/logs/23, sim/sql/041):
                 c.distance_to_home_miles, c.distance_to_home_miles_landing,
                 c.home_progress_bonus, c.cycle_end_stranding_penalty,
+                # Home-time retarget (documents/logs/25-26, sim/sql/047):
+                c.hours_since_home, c.hours_since_home_landing,
             ))
             for i, ev in enumerate(c.trip_state.history):
                 event_rows.append((sim_id, c.trip_id, i, c.driver_id, ev.status.value, ev.at))
@@ -1215,7 +1486,8 @@ def save_run(result: dict) -> None:
                next_hos_driving_remaining, next_hos_duty_remaining,
                next_hos_cycle1_remaining, next_hos_cycle2_remaining,
                distance_to_home_miles, distance_to_home_miles_landing,
-               home_progress_bonus, cycle_end_stranding_penalty)
+               home_progress_bonus, cycle_end_stranding_penalty,
+               hours_since_home, hours_since_home_landing)
                values %s""",
             assignment_rows,
         )

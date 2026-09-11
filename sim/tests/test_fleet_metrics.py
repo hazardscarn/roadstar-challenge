@@ -35,7 +35,7 @@ def _sim_data(**lane_route_overrides) -> SimData:
     return SimData(
         locations={}, location_region={}, region_centroids={}, hub_ids={'London': LONDON_HUB, 'Milton': MILTON_HUB},
         lane_weights=[], lane_routes=lane_routes, order_arrival_rate={}, dwell_minutes={},
-        hos_median_remaining_hours=8.0, order_pool=[], driver_ids=[], driver_terminal_zone={},
+        hos_median_remaining_hours=8.0, order_pool=[], driver_ids=[], driver_terminal_zone={}, driver_home_hub={},
         truck_numbers=[], driver_default_truck={}, origin_density={}, lead_time_samples=[],
     )
 
@@ -84,7 +84,7 @@ class TestCyclesForDriver:
             next_location_id=MILTON_HUB, next_hos_remaining=9.0,
             next_available_at=datetime(2026, 9, 1, 10, tzinfo=timezone.utc),
         )
-        data.driver_terminal_zone[16] = 'ONMIL'  # home hub = Milton
+        data.driver_home_hub[16] = MILTON_HUB  # home hub = Milton (calibration.driver_home_hub, sim/sql/045)
         cycles = cycles_for_driver(data, 16, [trip], sim_start=datetime(2026, 9, 1, tzinfo=timezone.utc))
         assert len(cycles) == 1
         c = cycles[0]
@@ -98,8 +98,7 @@ class TestCyclesForDriver:
         """THE real gap this whole metric exists to price: a driver still away from home when
         their trip sequence for the week simply ends -- must be priced via get_route(), not
         dropped from the average."""
-        data = _sim_data()
-        data.driver_terminal_zone[16] = None  # home hub = London (default)
+        data = _sim_data()  # driver_home_hub is empty -- driver_home_hub_id() falls back to London by default
         trip = _trip(
             driver_id=16, order=_order(origin_location_id=LONDON_HUB, dest_location_id=CUSTOMER_A),
             next_location_id=CUSTOMER_A, next_hos_remaining=7.0,

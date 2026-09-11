@@ -277,6 +277,39 @@ HOS_URGENCY_SAFETY_BUFFER_HOURS = 4.0
 # the paired significance test, not treated as final on the first pass.
 ASSUMED_CYCLE_STRANDING_PENALTY_CAD_MAX = 2000.0
 
+# Home-time retarget (documents/logs/25_home_time_research_and_methodology_references.md) --
+# SYNTHESIZED, a business cadence, not a legal one (no real "how often should a driver see home"
+# figure exists in the source data). `_hos_urgency()`'s existing legal-cycle version (above) stays
+# gated on the real 70h/7d-120h/14d HOS clocks; that alone was confirmed dormant almost always
+# (documents/logs/24: 0/8,990 trips ever triggered it -- a normal week never gets close to the
+# legal limit). The real precedent for pairing a legal clock with a separate business one: Powell
+# et al.'s Schneider National fleet-management case study (Simão et al. 2009, Transportation
+# Science) tracked "days from home" as a driver attribute distinct from the 70-hour rule, and its
+# resulting policy "gets drivers home, on weekends, on a regular basis" -- a business cadence, not
+# a legal deadline. 7 days (one work week) is a reasonable starting point for a regional Southern
+# Ontario carrier (drivers home weekly or more often, not long-haul OTR out for weeks) -- flagged
+# as tunable, not treated as final on the first pass, same propose-then-validate standard as
+# HOS_URGENCY_SAFETY_BUFFER_HOURS above.
+ASSUMED_TARGET_HOURS_BETWEEN_HOME = 24.0 * 7
+
+# SYNTHESIZED -- the combined-urgency level (0-1, see reward.py's combined_home_urgency()) at
+# which the post-completion repositioning mechanic (run_sim.py's dynamic_post_completion_probs()
+# call site) starts biasing toward the driver's OWN home hub instead of the generic nearest one,
+# and becomes more likely to reposition at all. No real "at what urgency does a real dispatcher
+# start steering a driver home" figure exists to calibrate against.
+#
+# CHECKED, not assumed (documents/logs/26): the first proposal (0.3) was validated against a real
+# 500-run batch + paired comparison + real-data backtest/cycle-analysis -- it DID produce the real,
+# statistically significant distance-to-home improvement this feature was built for (p=0.0003 on
+# the paired comparison, and a 16% real-order-sequence gap closure on the strict backtest sanity
+# check), but triggered noticeably more often than a real dispatcher's own historical pattern
+# (999 simulated cycles vs REAL's 668 over the same real order sequence; 17.7mi avg empty-return
+# miles/cycle vs REAL's own 1.7mi) and came with a borderline total-reward dip (paired t-test
+# p=0.0513, just short of conventional significance but suggestive of a real small trade-off).
+# Raised to 0.6 here as a second, more conservative pass -- requires genuinely elevated urgency
+# before the mechanic engages, re-validated the same way before being treated as final.
+HOME_URGENCY_REPOSITION_THRESHOLD = 0.6
+
 # Real physical constant, not an assumption.
 KM_PER_MILE = 1.60934
 

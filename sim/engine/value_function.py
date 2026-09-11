@@ -67,7 +67,7 @@ def _predict_state_value(
     booster: xgb.Booster, feature_columns: list[str], region_id: int, hos_remaining: float,
     hour: int, dow: int, truck_pct_km_interval: float, truck_pct_days_interval: float,
     hos_cycle1_remaining: float | None = None, hos_cycle2_remaining: float | None = None,
-    distance_to_home_miles: float | None = None,
+    distance_to_home_miles: float | None = None, hours_since_home: float | None = None,
 ) -> float:
     """Raw numpy construction, not pandas get_dummies/concat -- measured at ~3.2ms/call with the
     pandas version (a real cost once candidates start numbering in the dozens per order arrival,
@@ -90,12 +90,13 @@ def _predict_state_value(
     Returns the SHRUNK-AND-CLIPPED prediction (V_SHRINKAGE_FACTOR, V_CLIP_MIN/MAX above), not the
     raw booster output -- see this module's header comment for the concrete regression this fixes.
 
-    `hos_cycle1/2_remaining`/`distance_to_home_miles` (documents/logs/23, sim/sql/041): optional,
-    default None -- only set into the row if BOTH a real value was passed AND that column name
-    actually exists in `feature_columns`. This is what lets the SAME function score either the
-    OLD model shape (6 features, no home-progress dimensions) or a NEW retrained one (9 features)
-    without a separate code path -- a model trained on the old feature set simply never has these
-    column names in its `feature_columns` list, so they're silently skipped rather than raising.
+    `hos_cycle1/2_remaining`/`distance_to_home_miles`/`hours_since_home` (documents/logs/23,25-26,
+    sim/sql/041,047): optional, default None -- only set into the row if BOTH a real value was
+    passed AND that column name actually exists in `feature_columns`. This is what lets the SAME
+    function score either an OLD model shape (missing the newest home-progress dimensions) or a
+    NEW retrained one without a separate code path -- a model trained on the old feature set
+    simply never has these column names in its `feature_columns` list, so they're silently
+    skipped rather than raising.
     """
     row = np.zeros((1, len(feature_columns)), dtype=np.float32)
     values = {
@@ -109,6 +110,8 @@ def _predict_state_value(
         values['hos_cycle2_remaining'] = hos_cycle2_remaining
     if distance_to_home_miles is not None:
         values['distance_to_home_miles'] = distance_to_home_miles
+    if hours_since_home is not None:
+        values['hours_since_home'] = hours_since_home
     for col, val in values.items():
         if col not in feature_columns:
             continue  # backward compat -- see docstring above
@@ -159,6 +162,19 @@ def make_value_fn(booster: xgb.Booster, feature_columns: list[str], data: SimDat
         # reward's own notion never silently diverge.
         dest_distance_to_home = candidate.distance_to_home_miles_landing
 
+        # Home-time retarget (documents/logs/25-26) -- the business-cadence companion to
+        # dest_distance_to_home above, using the SAME "0.0 once landing AT home, else current plus
+        # this trip's duty hours" estimate reward.py's compute_reward()/run_sim.py's
+        # run_assignment() both already use, so V(s') and the realized reward never silently
+        # disagree about what "hours since home at the landing state" means.
+        home_hub_id = driver_home_hub_id(data, candidate.driver_id)
+        landed_hours_since_home = None
+        if candidate.hours_since_home is not None:
+            landed_hours_since_home = (
+                0.0 if order.dest_location_id == home_hub_id
+                else candidate.hours_since_home + candidate.planned_duty_hours
+            )
+
         # Projected post-trip truck-maintenance state -- SAME after_trip() math run_sim.py itself
         # uses once a trip actually completes (documents/logs/18), so scoring and simulation agree
         # on what "the truck's condition after this trip" means, same principle as
@@ -173,7 +189,7 @@ def make_value_fn(booster: xgb.Booster, feature_columns: list[str], data: SimDat
         v_at_dest = _predict_state_value(
             booster, feature_columns, dest_region, landed_hos, hour, dow, truck_pct_km, truck_pct_days,
             hos_cycle1_remaining=landed_cycle1, hos_cycle2_remaining=landed_cycle2,
-            distance_to_home_miles=dest_distance_to_home,
+            distance_to_home_miles=dest_distance_to_home, hours_since_home=landed_hours_since_home,
         )
         if p_deadhead > 0:
             dest_lat, dest_lon = data.locations[order.dest_location_id]
@@ -182,16 +198,22 @@ def make_value_fn(booster: xgb.Booster, feature_columns: list[str], data: SimDat
                 key=lambda hid: _haversine_km((dest_lat, dest_lon), data.locations[hid]),
             )
             # The deadhead branch lands at nearest_hub_id, NOT order.dest_location_id -- its
-            # distance-to-home is a genuinely different figure from dest_distance_to_home above
-            # (this driver's own home hub may or may not BE nearest_hub_id), so it needs its own
-            # get_route() call rather than reusing the candidate's dest-anchored figure.
-            home_hub_id = driver_home_hub_id(data, candidate.driver_id)
+            # distance-to-home (and hours-since-home) is a genuinely different figure from the
+            # dest-anchored ones above (this driver's own home hub may or may not BE
+            # nearest_hub_id), so it needs its own get_route() call/zero-at-home check rather than
+            # reusing the candidate's dest-anchored figures.
             hub_distance_to_home, _ = get_route(data, nearest_hub_id, home_hub_id)
+            landed_hours_since_home_at_hub = None
+            if candidate.hours_since_home is not None:
+                landed_hours_since_home_at_hub = (
+                    0.0 if nearest_hub_id == home_hub_id
+                    else candidate.hours_since_home + candidate.planned_duty_hours
+                )
             v_at_hub = _predict_state_value(
                 booster, feature_columns, data.location_region[nearest_hub_id], landed_hos, hour, dow,
                 truck_pct_km, truck_pct_days,
                 hos_cycle1_remaining=landed_cycle1, hos_cycle2_remaining=landed_cycle2,
-                distance_to_home_miles=hub_distance_to_home,
+                distance_to_home_miles=hub_distance_to_home, hours_since_home=landed_hours_since_home_at_hub,
             )
         else:
             v_at_hub = v_at_dest

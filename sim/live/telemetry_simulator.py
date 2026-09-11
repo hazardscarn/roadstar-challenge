@@ -38,7 +38,7 @@ from datetime import datetime, timedelta, timezone
 
 from sim.db import cursor
 from sim.engine.route_interpolation import get_route_geometry, interpolate_position, route_distance_km
-from sim.engine.run_sim import get_route, load_sim_data, sample_dwell_hours
+from sim.engine.run_sim import driver_home_hub_id, get_route, load_sim_data, sample_dwell_hours
 
 TICK_SECONDS = 4
 TIME_SCALE = 30  # 1 real second = 30 simulated seconds -- see module docstring
@@ -115,11 +115,16 @@ def _complete_trip(cur, data, trip_id: uuid.UUID, driver_id: int, truck_number: 
     """, (str(trip_id), loaded_miles, pre_deadhead, op_cost_per_mile, revenue))
 
     cur.execute("""update live.trips set status = 'completed', last_event = 'COMPLETE' where trip_id = %s""", (str(trip_id),))
+    # Home-time retarget (sim/sql/046, documents/logs/25): a real arrival at the driver's OWN home
+    # hub, stamped as it actually happens -- `data` is None only in a test that doesn't care about
+    # this (see test_live_multi_trip_scoring.py), never in the real running simulator.
+    is_home_arrival = data is not None and dest_id == driver_home_hub_id(data, driver_id)
     cur.execute("""
         update live.driver_status set current_trip_id = null, duty_status = 'off_duty',
-               last_location_id = %s, position = null, speed_mph = 0, fuel_pct = 100, updated_at = now()
+               last_location_id = %s, position = null, speed_mph = 0, fuel_pct = 100, updated_at = now(),
+               last_home_arrival_at = case when %s then now() else last_home_arrival_at end
         where driver_id = %s
-    """, (dest_id, driver_id))
+    """, (dest_id, is_home_arrival, driver_id))
 
     # Real multi-trip booking (sim/sql/042, documents/logs/23-24 / feature_reference_and_inference_
     # guide.md Section 4): a driver can already have FUTURE trips booked ('scheduled' -- see

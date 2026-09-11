@@ -41,6 +41,10 @@ from sim.engine.run_sim import Order, load_sim_data  # noqa: E402
 TEST_DRIVER_ID = 16  # matches test_live_pipeline.py's convention -- real driver_id, not in the 30-demo fleet
 LONDON_HUB_LOCATION_ID = 1
 MILTON_HUB_LOCATION_ID = 2
+# Deliberately NOT London/Milton -- a location_id that never appears as a trip destination in
+# these hand-built scenarios, so passing it as home_hub_id to project_driver_state() can never
+# accidentally register a queued trip as "arriving home" in a test that isn't exercising that.
+HOME_HUB_ID = 999999
 
 
 def _driver(**overrides) -> LiveDriverRow:
@@ -76,7 +80,7 @@ class TestProjectDriverState:
 
     def test_idle_driver_no_queue_returns_real_current_state(self):
         drv = _driver()
-        result = project_driver_state(drv, [], self.NOW, self.NOW)
+        result = project_driver_state(drv, [], self.NOW, self.NOW, HOME_HUB_ID)
         assert result is not None
         proj, next_trip = result
         assert proj.location_id == LONDON_HUB_LOCATION_ID
@@ -87,7 +91,7 @@ class TestProjectDriverState:
 
     def test_idle_driver_with_no_known_position_is_not_a_candidate(self):
         drv = _driver(last_location_id=None)
-        assert project_driver_state(drv, [], self.NOW, self.NOW) is None
+        assert project_driver_state(drv, [], self.NOW, self.NOW, HOME_HUB_ID) is None
 
     def test_single_in_progress_trip_uses_real_telemetry_projection(self):
         """An active trip's projected_* fields (telemetry-set, sim/sql/029) are the real source
@@ -101,7 +105,7 @@ class TestProjectDriverState:
             projected_hos_remaining_hours=6.5, projected_truck_pct_km_interval=0.3,
             projected_truck_pct_days_interval=0.2,
         )
-        proj, next_trip = project_driver_state(drv, [trip], self.NOW, trip.eta)
+        proj, next_trip = project_driver_state(drv, [trip], self.NOW, trip.eta, HOME_HUB_ID)
         assert proj.location_id == MILTON_HUB_LOCATION_ID
         assert proj.effective_start == trip.eta
         assert proj.hos_duty_hours_remaining == 6.5
@@ -117,7 +121,7 @@ class TestProjectDriverState:
         the worked example from feature_reference_and_inference_guide.md Section 4."""
         drv = _driver()
         trip = _queued_trip(status="scheduled", planned_duty_hours=3.5)
-        proj, next_trip = project_driver_state(drv, [trip], self.NOW, trip.planned_completion_at)
+        proj, next_trip = project_driver_state(drv, [trip], self.NOW, trip.planned_completion_at, HOME_HUB_ID)
         assert proj.location_id == MILTON_HUB_LOCATION_ID  # NOT London -- would be wrong (the bug)
         assert proj.effective_start == trip.planned_completion_at
         assert proj.hos_duty_hours_remaining == pytest.approx(11.0 - 3.5)
@@ -129,7 +133,7 @@ class TestProjectDriverState:
         estimate-based projection as 'scheduled', not treated as already in-progress."""
         drv = _driver()
         trip = _queued_trip(status="assigned", planned_duty_hours=2.0)
-        proj, _next_trip = project_driver_state(drv, [trip], self.NOW, trip.planned_completion_at)
+        proj, _next_trip = project_driver_state(drv, [trip], self.NOW, trip.planned_completion_at, HOME_HUB_ID)
         assert proj.effective_start == trip.planned_completion_at
         assert proj.hos_duty_hours_remaining == pytest.approx(11.0 - 2.0)
 
@@ -148,7 +152,7 @@ class TestProjectDriverState:
             eta=datetime(2026, 9, 12, 17, 0, tzinfo=timezone.utc), planned_duty_hours=4.0,
             planned_completion_at=datetime(2026, 9, 12, 21, 30, tzinfo=timezone.utc),
         )
-        proj, next_trip = project_driver_state(drv, [trip1, trip2], self.NOW, trip2.planned_completion_at)
+        proj, next_trip = project_driver_state(drv, [trip1, trip2], self.NOW, trip2.planned_completion_at, HOME_HUB_ID)
         assert proj.location_id == LONDON_HUB_LOCATION_ID  # trip 2's destination, not trip 1's
         assert proj.effective_start == trip2.planned_completion_at
         # both trips' planned_duty_hours subtracted in sequence: 11.0 - 3.0 - 4.0 = 4.0
@@ -167,7 +171,7 @@ class TestProjectDriverState:
             hos_cycle1_hours_remaining=20.0, hos_cycle2_hours_remaining=40.0,
             updated_at=datetime(2026, 9, 11, 20, 0, tzinfo=timezone.utc),  # 14h before self.NOW
         )
-        proj, _next_trip = project_driver_state(drv, [], self.NOW, self.NOW)
+        proj, _next_trip = project_driver_state(drv, [], self.NOW, self.NOW, HOME_HUB_ID)
         assert proj.hos_driving_hours_remaining == 13.0  # HOS_MAX_DRIVING_HOURS
         assert proj.hos_duty_hours_remaining == 14.0  # HOS_MAX_ON_DUTY_HOURS
         assert proj.hos_cycle1_hours_remaining == 20.0  # untouched
@@ -182,7 +186,7 @@ class TestProjectDriverState:
             hos_driving_hours_remaining=2.0, hos_duty_hours_remaining=2.5,
             updated_at=datetime(2026, 9, 12, 5, 0, tzinfo=timezone.utc),  # 5h before self.NOW
         )
-        proj, _next_trip = project_driver_state(drv, [], self.NOW, self.NOW)
+        proj, _next_trip = project_driver_state(drv, [], self.NOW, self.NOW, HOME_HUB_ID)
         assert proj.hos_driving_hours_remaining == 2.0
         assert proj.hos_duty_hours_remaining == 2.5
 
@@ -195,7 +199,7 @@ class TestProjectDriverState:
             status="scheduled", planned_duty_hours=3.0,
             planned_completion_at=datetime(2026, 9, 11, 22, 0, tzinfo=timezone.utc),  # 12h before self.NOW
         )
-        proj, _next_trip = project_driver_state(drv, [trip], self.NOW, self.NOW)
+        proj, _next_trip = project_driver_state(drv, [trip], self.NOW, self.NOW, HOME_HUB_ID)
         assert proj.hos_driving_hours_remaining == 13.0
         assert proj.hos_duty_hours_remaining == 14.0
         assert proj.effective_start == self.NOW  # now > landing_time -- they'd depart at `now`, not earlier
@@ -206,9 +210,60 @@ class TestProjectDriverState:
         the projection itself must never produce a nonsensical negative remaining-hours figure."""
         drv = _driver(hos_duty_hours_remaining=2.0, hos_cycle1_hours_remaining=5.0)
         trip = _queued_trip(status="scheduled", planned_duty_hours=8.0)
-        proj, _next_trip = project_driver_state(drv, [trip], self.NOW, trip.planned_completion_at)
+        proj, _next_trip = project_driver_state(drv, [trip], self.NOW, trip.planned_completion_at, HOME_HUB_ID)
         assert proj.hos_duty_hours_remaining == 0.0
         assert proj.hos_cycle1_hours_remaining == 0.0
+
+    # --- Home-time retarget (documents/logs/25): last_home_at, CHAIN-WALKED forward through the
+    # real trip queue exactly like landing_time/hos_* above -- the user's own explicit correction:
+    # "this last at home feature have to be dynamically added... in future trip assignments this
+    # also updates so next calc will know this." ---
+
+    def test_last_home_at_falls_back_to_updated_at_when_nothing_queued_lands_home(self):
+        """No real last_home_arrival_at on file (a driver seeded before sim/sql/046) and nothing
+        queued lands at home -- falls back to updated_at, the same tolerant pattern the HOS
+        sub-clocks already use for a driver seeded before sim/sql/042."""
+        drv = _driver(last_home_arrival_at=None)
+        proj, _next_trip = project_driver_state(drv, [], self.NOW, self.NOW, LONDON_HUB_LOCATION_ID)
+        assert proj.last_home_at == drv.updated_at
+
+    def test_last_home_at_uses_the_real_column_when_set(self):
+        """A real last_home_arrival_at on file, with nothing queued that changes it -- used
+        directly, not overridden by updated_at."""
+        real_last_home = datetime(2026, 9, 10, 6, 0, tzinfo=timezone.utc)
+        drv = _driver(last_home_arrival_at=real_last_home)
+        proj, _next_trip = project_driver_state(drv, [], self.NOW, self.NOW, LONDON_HUB_LOCATION_ID)
+        assert proj.last_home_at == real_last_home
+
+    def test_chain_walk_updates_last_home_at_when_a_settled_queued_trip_lands_at_home(self):
+        """THE real case this closes: a driver's real trip queue already has a booking that lands
+        them back at home BEFORE the trip being scored -- last_home_at must reflect THAT projected
+        arrival, not the driver's live.driver_status row (which only knows reality up to now, not
+        an already-committed future booking)."""
+        drv = _driver(last_home_arrival_at=datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc))  # stale, weeks old
+        home_landing_trip = _queued_trip(
+            status="scheduled", dest_location_id=LONDON_HUB_LOCATION_ID,
+            eta=datetime(2026, 9, 12, 11, 0, tzinfo=timezone.utc), planned_duty_hours=2.0,
+            planned_completion_at=datetime(2026, 9, 12, 13, 0, tzinfo=timezone.utc),
+        )
+        proj, _next_trip = project_driver_state(
+            drv, [home_landing_trip], self.NOW, home_landing_trip.planned_completion_at, LONDON_HUB_LOCATION_ID,
+        )
+        assert proj.last_home_at == home_landing_trip.planned_completion_at
+
+    def test_chain_walk_does_not_update_last_home_at_for_a_trip_that_does_not_land_home(self):
+        """A settled queued trip landing somewhere OTHER than home must NOT touch last_home_at --
+        only a real arrival at the driver's own home hub counts."""
+        drv = _driver(last_home_arrival_at=datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc))
+        trip = _queued_trip(
+            status="scheduled", dest_location_id=MILTON_HUB_LOCATION_ID,
+            eta=datetime(2026, 9, 12, 11, 0, tzinfo=timezone.utc), planned_duty_hours=2.0,
+            planned_completion_at=datetime(2026, 9, 12, 13, 0, tzinfo=timezone.utc),
+        )
+        proj, _next_trip = project_driver_state(
+            drv, [trip], self.NOW, trip.planned_completion_at, LONDON_HUB_LOCATION_ID,
+        )
+        assert proj.last_home_at == drv.last_home_arrival_at
 
     # --- The real availability window (documents/logs -- "irrespective of the time I select
     # it's always the same driver" bug fix): a driver isn't a candidate just because they'll
@@ -222,7 +277,7 @@ class TestProjectDriverState:
         drv = _driver()
         trip = _queued_trip(status="in_transit", eta=datetime(2026, 9, 12, 13, 0, tzinfo=timezone.utc))
         pickup_at = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)  # 1h before the trip actually ends
-        assert project_driver_state(drv, [trip], self.NOW, pickup_at) is None
+        assert project_driver_state(drv, [trip], self.NOW, pickup_at, HOME_HUB_ID) is None
 
     def test_driver_whose_next_trip_already_started_by_pickup_time_is_not_a_candidate(self):
         """A 'scheduled' trip whose own real departure (eta) falls AT OR BEFORE the requested
@@ -236,7 +291,7 @@ class TestProjectDriverState:
             planned_completion_at=datetime(2026, 9, 12, 14, 0, tzinfo=timezone.utc),  # ends at 14:00
         )
         pickup_at = datetime(2026, 9, 12, 11, 0, tzinfo=timezone.utc)  # exactly when it starts
-        assert project_driver_state(drv, [trip], self.NOW, pickup_at) is None
+        assert project_driver_state(drv, [trip], self.NOW, pickup_at, HOME_HUB_ID) is None
 
     def test_driver_free_in_a_real_gap_projects_only_through_settled_trips(self):
         """THE core fix: a driver with one trip completing well before pickup_at, and a SEPARATE
@@ -258,7 +313,7 @@ class TestProjectDriverState:
             planned_completion_at=datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc),
         )
         pickup_at = datetime(2026, 9, 12, 18, 0, tzinfo=timezone.utc)  # in the gap between the two
-        result = project_driver_state(drv, [settled_trip, future_trip], self.NOW, pickup_at)
+        result = project_driver_state(drv, [settled_trip, future_trip], self.NOW, pickup_at, HOME_HUB_ID)
         assert result is not None
         proj, next_trip = result
         assert proj.location_id == MILTON_HUB_LOCATION_ID  # settled trip's destination, NOT London

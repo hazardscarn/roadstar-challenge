@@ -48,6 +48,12 @@ class Candidate:
     distance_to_home_miles_landing: float | None = None
     hours_to_home_current: float | None = None
     hours_to_home_landing: float | None = None
+    # Home-time retarget (documents/logs/25): real hours since this driver was last actually AT
+    # their home hub -- the business-cadence companion to the legal-cycle clock, since the legal
+    # one alone was confirmed dormant almost always (documents/logs/24). Optional/None -- same
+    # backward-compatible pattern as the fields above; compute_reward() degrades to legal-only
+    # urgency when this isn't set.
+    hours_since_home: float | None = None
 
 
 def zero_value_fn(candidate: Candidate, order, now=None) -> float:
@@ -95,6 +101,7 @@ def score_candidate(
         distance_to_home_miles_landing=candidate.distance_to_home_miles_landing,
         hours_to_home_current=candidate.hours_to_home_current,
         hours_to_home_landing=candidate.hours_to_home_landing,
+        hours_since_home=candidate.hours_since_home,
         gamma=gamma,
     )
     score = reward.total + gamma * value_fn(candidate, order, now)

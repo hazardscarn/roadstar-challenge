@@ -177,6 +177,11 @@ export interface OrderStoryTrip {
   post_delivery_deadhead_cost: number
   post_delivery_deadhead_miles: number
   reloaded_immediately: boolean
+  // Real user feedback: the order book's own "+$X saved" badge (reload_immediate) was showing
+  // with nowhere in this story explaining where the $ came from -- this is that SAME real figure
+  // (the value of the NEXT job needing no deadhead, vs. the real other candidates it had on the
+  // table), now surfaced here too, not just computed for the order-book row.
+  reload_savings_value: number
   lateness_penalty: number
   net_margin: number
   had_breakdown: boolean
@@ -189,6 +194,41 @@ export interface OrderStoryTrip {
   trajectory: [number, number, number][]
   previous_trip: OrderStoryAdjacentTrip | null
   next_trip: OrderStoryAdjacentTrip | null
+  cycle: OrderStoryCycle | null
+}
+
+// Real user feedback: "order story maybe should show all the trips driver took in that cycle
+// instead of just before this and after ... P1 P2 ... D1 D2 ... H etc." -- the driver's real
+// home-base-to-home-base loop this order's trip is part of, every leg in it (not just the ones
+// immediately adjacent), and whether/how it closes back at home base -- the direct per-order
+// counterpart of sim/engine/fleet_metrics.py's fleet-wide cycle metrics.
+export interface OrderStoryCycleTrip {
+  trip_id: string
+  quote_id: string
+  is_current: boolean
+  pickup_label: string  // "P1", "P2", ...
+  dropoff_label: string // "D1", "D2", ...
+  origin_location_id: number
+  dest_location_id: number
+  origin_label: string | null
+  dest_label: string | null
+  assigned_at: string | null
+  completed_at: string | null
+  order_revenue: number
+  deadhead_miles: number
+  reload_immediate: boolean
+  reload_savings_value: number
+  trajectory: [number, number, number][]
+}
+
+export interface OrderStoryCycle {
+  home_hub_label: string | null
+  closed_via: 'trip' | 'assumed'
+  empty_return_miles: number
+  empty_return_value: number
+  n_trips: number
+  total_revenue: number
+  trips: OrderStoryCycleTrip[]
 }
 
 export interface OrderStoryAdjacentTrip {

@@ -78,9 +78,14 @@ N_REGIONS = 25  # sim/cluster_locations.py's H3 cell count -- fixed so current/n
 # home-terminal distance (NOT dest_distance_to_hub_km, which is nearest-ANY-hub and
 # driver-agnostic) -- lets V(s) anticipate the home_progress_bonus/cycle_end_stranding_penalty
 # dynamic prospectively from POSITION, not just have it baked into an opaque scalar target.
+#
+# hours_since_home added (documents/logs/25-26, sim/sql/047): the BUSINESS-cadence companion to
+# distance_to_home_miles -- the real gap documents/logs/26 reported was closed here: the reward
+# was already shaped around this signal, but V(s) had no direct feature to see it by, only its
+# indirect effect baked into realized reward.
 NON_REGION_FEATURES = [
     'hos_remaining', 'hour_of_day', 'day_of_week', 'truck_pct_km_interval', 'truck_pct_days_interval',
-    'hos_cycle1_remaining', 'hos_cycle2_remaining', 'distance_to_home_miles',
+    'hos_cycle1_remaining', 'hos_cycle2_remaining', 'distance_to_home_miles', 'hours_since_home',
 ]
 
 
@@ -108,6 +113,7 @@ def load_transitions() -> pd.DataFrame:
                       driver_hos_cycle2_remaining as hos_cycle2_remaining,
                       next_hos_cycle1_remaining, next_hos_cycle2_remaining,
                       distance_to_home_miles, distance_to_home_miles_landing as next_distance_to_home_miles,
+                      hours_since_home, hours_since_home_landing as next_hours_since_home,
                       target_value
                from training_transitions
                where was_exploration = false"""
@@ -120,6 +126,7 @@ def load_transitions() -> pd.DataFrame:
         'hos_cycle1_remaining', 'hos_cycle2_remaining',
         'next_hos_cycle1_remaining', 'next_hos_cycle2_remaining',
         'distance_to_home_miles', 'next_distance_to_home_miles',
+        'hours_since_home', 'next_hours_since_home',
     ]
     for col in float_cols:
         df[col] = df[col].astype(float)
@@ -156,6 +163,7 @@ def build_next_state_features(df: pd.DataFrame) -> pd.DataFrame:
         'next_hos_cycle1_remaining': 'hos_cycle1_remaining',
         'next_hos_cycle2_remaining': 'hos_cycle2_remaining',
         'next_distance_to_home_miles': 'distance_to_home_miles',
+        'next_hours_since_home': 'hours_since_home',
     }
     next_cols = df[list(rename_map.keys())].rename(columns=rename_map)
     return pd.concat([dummies, next_cols], axis=1)
