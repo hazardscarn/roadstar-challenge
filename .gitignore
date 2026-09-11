@@ -216,3 +216,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+research
+login_info.md
+# Dashboard app (Vite + FastAPI local server)
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.env
+dashboard/server/__pycache__/
+dashboard/server/*.pyc
+documents/demo_credentials.md
+.claude
+
+# OSRM self-hosted routing engine data (ops/osrm_setup.sh) -- 2.2GB of regenerable binary routing
+# graph + the raw OSM extract, not source; some files end up root-owned by the Docker container,
+# which also breaks a plain `git add -A` with a permission error.
+ops/osrm-data/
+
+# LibreOffice/OpenOffice lock file for data/*.xlsx while it's open in an editor -- transient, not
+# real content.
+.~lock.*#

@@ -1,0 +1,64 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@600;700;800&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
+
+  /* Brand: "highway blue" -- one accent, used sparingly (primary actions, active nav, links). */
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dce8ff;
+  --color-brand-200: #b3cdff;
+  --color-brand-300: #7fabff;
+  --color-brand-400: #4c82f5;
+  --color-brand-500: #2a5cdb;
+  --color-brand-600: #1e46b3;
+  --color-brand-700: #1a3a91;
+  --color-brand-800: #172f70;
+  --color-brand-900: #142757;
+
+  /* Neutral scale -- the operational chrome (rails, cards, borders, table rows). */
+  --color-ink-50: #f7f8fa;
+  --color-ink-100: #eef0f3;
+  --color-ink-200: #dfe3e8;
+  --color-ink-300: #c3c9d2;
+  --color-ink-400: #97a0ad;
+  --color-ink-500: #6b7382;
+  --color-ink-600: #4c5462;
+  --color-ink-700: #363c48;
+  --color-ink-800: #23272f;
+  --color-ink-900: #14171c;
+
+  /* Semantic status -- reused everywhere: map markers, duty-status chips, HOS ring, badges.
+     Grounded in real ELD app conventions (Motive/Transflo HOS dials): green=driving/on-time/
+     available, amber=on-duty-not-driving/at-dock/HOS<2h/maintenance-due, red=HOS-critical/
+     breakdown/failed-inspection/overdue/late, gray=off-duty/out-of-service, blue=mid-route/info. */
+  --color-status-green-500: #1f9d55;
+  --color-status-green-100: #dcf5e3;
+  --color-status-amber-500: #e0940f;
+  --color-status-amber-100: #fbeacc;
+  --color-status-red-500: #d9342b;
+  --color-status-red-100: #fadedb;
+  --color-status-gray-500: #6b7382;
+  --color-status-gray-100: #eef0f3;
+  --color-status-blue-500: #2a5cdb;
+  --color-status-blue-100: #dce8ff;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-ink-200);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--color-ink-50);
+    color: var(--color-ink-900);
+    font-family: var(--font-sans);
+    font-feature-settings: 'tnum' 1, 'cv11' 1; /* tabular numerals for tables/KPIs */
+    -webkit-font-smoothing: antialiased;
+  }
+}
