@@ -1,0 +1,31 @@
+Real usable dispatched orders: 1667 across 42 real drivers
+Real usable UNDISPATCHED orders (real CREATED_TIME, no real pickup ever happened): 130
+
+Running TRAINED replay (dispatched + undispatched merged)...
+
+=== Operational EVENT comparison (REAL dispatch vs. TRAINED model) ===
+                                          REAL         TRAINED            Diff
+orders handled                           1,667           1,667              +0
+unassigned (TRAINED only)                  n/a               0                
+total deadhead miles                    30,766          30,364            -402
+avg deadhead miles/order                  18.5            18.2            -0.2
+orders w/ real deadhead leg              1,050           1,083             +33
+total loaded miles                      54,453          54,453              +0
+
+=== $ comparison (revenue - deadhead cost ONLY -- the apples-to-apples subset) ===
+                                          REAL         TRAINED            Diff
+total revenue                          229,688         229,688              +0
+total deadhead cost                     53,841          53,137            -704
+net (revenue - deadhead)               175,847         176,551            +704
+avg net/order                           105.49          105.91           +0.42
+
+=== Missed-opportunity recovery (real was_dispatched=false orders, replayed against the SAME fleet state) ===
+Real orders with was_dispatched=false: 141 total; usable (real origin+dest+CREATED_TIME): 130
+  (of which 48 are real YARD SHUTTLE moves -- origin=dest resolving to a real hub
+   location, matching classify_run_type()'s established category; correctly net ~$0 linehaul revenue)
+  -> TRAINED found a feasible candidate for: 130/130 (100.0%)
+  -> still no feasible candidate (genuinely no capacity, matching the real outcome): 0/130
+  -> net $ recovered on those 130 orders (revenue - deadhead cost): 10,509.41 CAD
+  -> avg $ recovered per recovered order: 80.84 CAD
+  -> excluding yard-shuttle moves, real FREIGHT opportunities recovered: 82, 10,617.67 CAD (129.48 CAD/order avg)
+  -> recovered bill_numbers: ['409068', '408872D', '408832D', '409141', '409192', '401260D', '408831D', '406701D', '406702D', '404735', '404241', '404736', '404238', '404734', '404239', '404732', '404244', '401715-AA', '408555D', '409146D', '408992D', '408360', '409431', '409277D', '409531', '409537', '409541', '409543', '409538', '409539', '409545', '409542', '409263D', '409342D', '409333D', '409595', '401473-AB', '401473-AA', '401473', '409236D', '409389D', '409387D', '409687', '409250D', '409278D', '409609D', '409899', '409699D', '409251D', '409251R', '409596D', '409763D', '409841D', '406419', '410230', '410277', '410278', '409930D', '410346', '410116D', '410363D', '410026D', '410881', '410393D', '410359D', '410360D', '410882', '410546T', '410546D', '411078', '411079', '410772D', '410856D', '410353D', '410951D', '410948D', '411030D', '411333', '411334', '410972D', '409392D', '411467', '411321D', '411556', '411557', '411620', '411619', '411629', '411628', '411325T', '411397D', '411396D', '411379D', '411838', '411841', '411837', '411601D', '411840', '411842', '411600D', '411472D', '412033', '412035', '412036', '412034', '411826D', '412057', '411700D', '411721D', '412128', '412251', '412253', '412252', '412266', '411982D', '411981D', '412318', '412140D', '412432', '412433', '412141D', '411974T', '412144D', '412290D', '412125T', '412264D', '412364D', '412510A', '412457D', '412457D-AA']

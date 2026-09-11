@@ -1,0 +1,570 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="1 Training Pipeline" id="train">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1160" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="How the Dispatch Model Is Built: Simulation &#8594; Features &#8594; Reward &#8594; Trained Value Function" style="text;html=1;align=left;verticalAlign=middle;fontStyle=1;fontSize=17;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="34" as="geometry" />
+        </mxCell>
+
+        <mxCell id="realData" value="Real Historical Dispatch Data&#xa;2,100+ real orders across 131 real drivers/trucks&#xa;(real carrier TMS export)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="440" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="calibration" value="Calibration Layer&#xa;Real order arrival rates &amp; lead-time distributions&#xa;Real dwell times, OSRM-routed lane distances" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="520" y="80" width="440" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="simEngine" value="Discrete-Event Simulation Engine&#xa;Simulates a fleet operating across real calendar time:&#xa;&#8226; Orders arrive with realistic lead times&#xa;&#8226; Hours-of-Service tracked live against 5 real Canadian legal limits&#xa;&#8226; Every legally-available driver/truck scored as a candidate&#xa;&#8226; Dispatch explores vs. exploits the current value estimate&#xa;&#8226; Truck breakdown &amp; maintenance risk modeled realistically" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="40" y="230" width="920" height="170" as="geometry" />
+        </mxCell>
+
+        <mxCell id="nRuns" value="500 Independent Simulated Weeks, run in parallel &#8594; 43,000+ real dispatch decisions generated" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="440" width="920" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="extraction" value="Feature Extraction&#xa;Every decision becomes one&#xa;training row: state &#8594; action&#xa;&#8594; reward &#8594; next-state" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="570" width="260" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="twoModels" value="Two Complementary Trained Models&#xa;Q(state, order, truck) -- scores a SPECIFIC candidate pairing&#xa;V(state) -- scores pure POSITION, via Fitted Value Iteration&#xa;(what is it worth to simply BE here, before knowing the next order?)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="340" y="570" width="460" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="trainedVF" value="Trained Value Function&#xa;Drives every dispatch decision:&#xa;score = immediate reward&#xa;+ &#947; &#215; V(next state)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="840" y="570" width="280" height="150" as="geometry" />
+        </mxCell>
+
+        <mxCell id="perfPanel" value="Model Performance&#xa;V(s): fit quality (R&#178;) improves from ~0.01 to ~0.27 across iterative refinement (Fitted Value Iteration)&#xa;Q-model: R&#178; = 0.07, beats a naive average-outcome baseline by ~20% on held-out decisions&#xa;Dispatch-quality check: statistically significant improvement in real net reward vs. an untrained baseline (p &lt; 0.01, paired test)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="40" y="750" width="1080" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.3;exitY=1;entryX=0.25;entryY=0;" edge="1" parent="1" source="realData" target="simEngine">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.7;exitY=1;entryX=0.75;entryY=0;" edge="1" parent="1" source="calibration" target="simEngine">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="simEngine" target="nRuns">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.17;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="nRuns" target="extraction">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="extraction" target="twoModels">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="twoModels" target="trainedVF">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="twoModels" target="perfPanel">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="liveNote" value="The trained value function feeds live dispatch scoring identically -- see the Reward Function and Feature Space diagrams for what it's actually optimizing and what it sees." style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontStyle=2;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="840" y="725" width="280" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="2 Live Pipeline" id="live">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1700" pageHeight="840" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title2" value="Live pipeline (Segment 5/7 -- schema built, dashboard/inference planned) — how a real quote becomes a real trip" style="text;html=1;align=left;verticalAlign=middle;fontStyle=1;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1300" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="quoteReq" value="Dispatcher submits a quote&#xa;-&gt; live.quote_requests&#xa;(origin, dest, weight, load_type)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="280" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="scoreFn" value="dashboard/api/score-quote.py&#xa;(PLANNED -- Vercel Python serverless)&#xa;loads trained V(s) + calibration.assumptions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="380" y="80" width="320" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="liveState" value="Real-time candidate state&#xa;live.driver_status + truck_maintenance_state&#xa;reference.locations + calibration.lane_routes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="380" y="230" width="320" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="rewardShared" value="compute_reward() + V(s)&#xa;SAME sim/engine/reward.py module&#xa;used identically in sim and live" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="760" y="150" width="300" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="quoteRec" value="live.quote_recommendations&#xa;ranked top-5 driver/truck options" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="160" width="260" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="tripCreate" value="Dispatcher assigns one&#xa;-&gt; live.trips created" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="160" width="240" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="geofence" value="Real GPS position updates&#xa;live.process_position_tick() (PL/pgSQL)&#xa;10-min dwell-confirmation buffer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="390" width="240" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="geofenceEvt" value="live.geofence_events&#xa;live.geofence_dwell_state" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="390" width="240" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="detention" value="live.detention_billing&#xa;pg_cron job (compute-detention)&#xa;dwell time beyond the free 2h window" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="820" y="390" width="280" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="tripLog" value="live.trip_log&#xa;one row per completed trip&#xa;(post_delivery_deadhead_miles tracked&#xa;separately -- see note below)" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="480" y="390" width="290" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ratings" value="live.driver_ratings / truck_ratings&#xa;views computed on read from trip_log" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="140" y="390" width="290" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dashboard" value="Dashboard (React + Vite, PLANNED)&#xa;live map, quote panel, reports,&#xa;driver/truck rating &amp; maintenance panels" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="560" width="1640" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="le1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="quoteReq" target="scoreFn">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="scoreFn" target="liveState">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.3;entryX=0;entryY=0.5;" edge="1" parent="1" source="scoreFn" target="rewardShared">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le3b" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.7;" edge="1" parent="1" source="liveState" target="rewardShared">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="rewardShared" target="quoteRec">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="quoteRec" target="tripCreate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="tripCreate" target="geofence">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="geofence" target="geofenceEvt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="geofenceEvt" target="detention">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="detention" target="tripLog">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le10" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="tripLog" target="ratings">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le11" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.15;entryY=0;" edge="1" parent="1" source="ratings" target="dashboard">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="le12" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.85;entryY=0;" edge="1" parent="1" source="quoteRec" target="dashboard">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1250" y="530" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="note" value="post_delivery_deadhead_miles = the empty drive-back distance AFTER a delivery, before the next real pickup&#xa;(same concept as sim, tracked identically here) -- the real revenue-loss signal both pipelines are built to minimize." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="680" width="1000" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend3" value="Legend" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#666666;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="680" width="260" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="l3g1" value="" style="rounded=0;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="legend3">
+          <mxGeometry x="10" y="30" width="30" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="l3g1t" value="Schema built &amp; applied" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;" vertex="1" parent="legend3">
+          <mxGeometry x="50" y="28" width="200" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="l3g2" value="" style="rounded=0;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="legend3">
+          <mxGeometry x="10" y="54" width="30" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="l3g2t" value="Planned -- not built yet" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;" vertex="1" parent="legend3">
+          <mxGeometry x="50" y="52" width="200" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="l3g3" value="" style="rounded=0;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="legend3">
+          <mxGeometry x="10" y="78" width="30" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="l3g3t" value="Shared code (sim = live)" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;" vertex="1" parent="legend3">
+          <mxGeometry x="50" y="76" width="200" height="20" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="3 Reward Function" id="reward">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1480" pageHeight="680" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="rtitle" value="What the Model Is Actually Optimizing: The Reward Function" style="text;html=1;align=left;verticalAlign=middle;fontStyle=1;fontSize=17;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1000" height="34" as="geometry" />
+        </mxCell>
+
+        <mxCell id="formula" value="score(candidate) = immediate_reward + &#947; &#215; V(landing state)&#xa;&#xa;immediate_reward = order_revenue &#8722; deadhead_cost &#8722; opportunity_cost_penalty &#8722; hos_stranding_risk_penalty &#8722; maintenance_risk_penalty &#8722; expected_lateness_penalty &#8722; cycle_end_stranding_penalty + home_progress_bonus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="1400" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="rc1" value="order_revenue&#xa;&#xa;Question: what does this trip earn?&#xa;&#xa;Computed: distance-tiered linehaul&#xa;rate &#215; miles (FTL); rate &#215; LTL&#xa;premium &#215; capacity filled (LTL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="190" width="330" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="rc2" value="deadhead_cost&#xa;&#xa;Question: what does it cost to&#xa;reach this pickup empty?&#xa;&#xa;Computed: empty repositioning&#xa;miles &#215; real operating cost/mile" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="390" y="190" width="330" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="rc3" value="opportunity_cost_penalty&#xa;(LTL only)&#xa;Question: how much truck&#xa;capacity are we wasting?&#xa;&#xa;Computed: unfilled capacity&#xa;fraction &#215; $ value per lb" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="740" y="190" width="330" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="rc4" value="hos_stranding_risk_penalty&#xa;&#xa;Question: how thin is this&#xa;driver's legal safety margin,&#xa;right now?&#xa;&#xa;Computed: ramps 0&#8594;1 as planned&#xa;duty hours approach the driver's&#xa;remaining legal hours" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="190" width="350" height="180" as="geometry" />
+        </mxCell>
+
+        <mxCell id="rc5" value="maintenance_risk_penalty&#xa;&#xa;Question: how likely is this&#xa;specific truck to break down?&#xa;&#xa;Computed: expected breakdown&#xa;cost, from real odometer +&#xa;calendar overdue-ness" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="390" width="330" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="rc6" value="expected_lateness_penalty&#xa;&#xa;Question: will this driver&#xa;actually arrive on time?&#xa;&#xa;Computed: real routed ETA vs.&#xa;the promised pickup time;&#xa;penalty grows faster the later&#xa;it runs (convex, not linear)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="390" y="390" width="330" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="rc7" value="cycle_end_stranding_penalty&#xa;&#xa;Question: could this trip leave&#xa;the driver stranded once their&#xa;weekly/bi-weekly legal hours&#xa;run out?&#xa;&#xa;Computed: fires only when the&#xa;LANDING state is both close to&#xa;the legal cycle limit AND still&#xa;far from home base" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="740" y="390" width="330" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="rc8" value="home_progress_bonus&#xa;&#xa;Question: does this trip help&#xa;work the driver back toward&#xa;base, or away from it?&#xa;&#xa;Computed: rewards PARTIAL,&#xa;PROPORTIONAL progress toward&#xa;home -- weighted by how&#xa;urgently it's actually needed,&#xa;not a flat bonus every time" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;fontStyle=1;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="390" width="350" height="180" as="geometry" />
+        </mxCell>
+
+        <mxCell id="rlegend" value="Legend" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#666666;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="600" width="1400" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="rl1" value="" style="rounded=0;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="rlegend">
+          <mxGeometry x="20" y="30" width="24" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="rl1t" value="Revenue earned" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;" vertex="1" parent="rlegend">
+          <mxGeometry x="50" y="28" width="150" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="rl2" value="" style="rounded=0;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="rlegend">
+          <mxGeometry x="220" y="30" width="24" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="rl2t" value="Real operating cost" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;" vertex="1" parent="rlegend">
+          <mxGeometry x="250" y="28" width="180" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="rl3" value="" style="rounded=0;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="rlegend">
+          <mxGeometry x="450" y="30" width="24" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="rl3t" value="Operational risk (safety, equipment, service)" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;" vertex="1" parent="rlegend">
+          <mxGeometry x="480" y="28" width="330" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="rl4" value="" style="rounded=0;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="rlegend">
+          <mxGeometry x="830" y="30" width="24" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="rl4t" value="Fleet positioning (getting drivers home when it matters)" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;" vertex="1" parent="rlegend">
+          <mxGeometry x="860" y="28" width="400" height="18" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="4 Feature Space" id="features">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1480" pageHeight="720" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="ftitle" value="What the Model Actually Sees: State &amp; Feature Space" style="text;html=1;align=left;verticalAlign=middle;fontStyle=1;fontSize=17;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1000" height="34" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leftPanelHdr" value="V(s) -- Position-Only State&#xa;&quot;How good is it to simply BE here, right now -- independent of which order comes next?&quot;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="680" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="leftPanelBody" value="POSITION &amp; GEOGRAPHY&#xa;&#8226; Region (H3 hexagonal cell of current location)&#xa;&#8226; Distance to the driver's own home terminal&#xa;&#xa;HOURS OF SERVICE&#xa;&#8226; Remaining hours (binding limit across all 5 real clocks)&#xa;&#8226; Remaining 7-day cycle hours, tracked separately&#xa;&#8226; Remaining 14-day cycle hours, tracked separately&#xa;&#xa;TIME&#xa;&#8226; Hour of day  &#8226;  Day of week&#xa;&#xa;TRUCK CONDITION&#xa;&#8226; % of maintenance interval used (distance-based)&#xa;&#8226; % of maintenance interval used (calendar-based)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f9ff;strokeColor=#6c8ebf;fontSize=12;align=left;verticalAlign=top;spacingLeft=15;spacingTop=15;" vertex="1" parent="1">
+          <mxGeometry x="40" y="160" width="680" height="410" as="geometry" />
+        </mxCell>
+
+        <mxCell id="rightPanelHdr" value="Q(s,a) -- Candidate-Specific Features&#xa;&quot;Given THIS driver, THIS truck, and THIS order -- how good a match is it?&quot;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="760" y="80" width="680" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="rightPanelBody" value="THIS DECISION'S ECONOMICS&#xa;&#8226; Pre-pickup deadhead miles &amp; hours&#xa;&#8226; Order weight, pallets, load type&#xa;&#8226; Load fill ratio (weight vs. pallet-space, whichever binds)&#xa;&#8226; FTL vs. LTL service type&#xa;&#xa;TIMING &amp; LEGALITY&#xa;&#8226; Planned driving hours / planned duty hours&#xa;&#8226; Real routed ETA vs. promised pickup time&#xa;&#xa;DESTINATION CONTEXT&#xa;&#8226; Distance from the delivery point to the nearest hub&#xa;&#8226; Local order density near the delivery point&#xa;&#xa;FLEET CONTEXT&#xa;&#8226; This specific truck's breakdown risk&#xa;&#8226; Total distance this decision commits the driver to&#xa;&#8226; Size of this driver's available truck pool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5fff5;strokeColor=#82b366;fontSize=12;align=left;verticalAlign=top;spacingLeft=15;spacingTop=15;" vertex="1" parent="1">
+          <mxGeometry x="760" y="160" width="680" height="410" as="geometry" />
+        </mxCell>
+
+        <mxCell id="connectNote" value="Together: score(candidate) = reward(THIS decision's features, right panel) + &#947; &#215; V(the position this decision leaves you in, left panel)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="600" width="1400" height="70" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="inference" name="5 Live Inference">
+    <mxGraphModel dx="-630" dy="-703" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="0" page="0" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <UserObject label="Dispatcher submits a NEW quote,&#xa;or EDITS / rescores an existing order" mermaidId="n:Q" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="Dispatcher submits a NEW quote,&#xa;or EDITS / rescores an existing order" id="2">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="73" width="323" x="244" y="8" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="&lt;b&gt;build_order_from_quote&lt;/b&gt;&#xa;real routed loaded_miles/hours -- OSRM&#xa;decision_time = max of now, pickup minus 24h&#xa;promised_delivery_at anchored to the REAL pickup date" mermaidId="n:ORDER" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="&lt;b&gt;build_order_from_quote&lt;/b&gt;&#xa;real routed loaded_miles/hours -- OSRM&#xa;decision_time = max of now, pickup minus 24h&#xa;promised_delivery_at anchored to the REAL pickup date" id="3">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="112" width="463" x="174" y="131" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="&lt;b&gt;load_live_fleet_snapshot&lt;/b&gt;&#xa;every driver, right now: position, truck %,&#xa;4 REAL HOS clocks -- driving, duty, cycle1, cycle2,&#xa;OWN home terminal via ground_truth.drivers join" mermaidId="n:FLEET" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="&lt;b&gt;load_live_fleet_snapshot&lt;/b&gt;&#xa;every driver, right now: position, truck %,&#xa;4 REAL HOS clocks -- driving, duty, cycle1, cycle2,&#xa;OWN home terminal via ground_truth.drivers join" id="4">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="112" width="420" x="196" y="293" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="&lt;b&gt;load_driver_trip_queues&lt;/b&gt;&#xa;EVERY non-terminal live.trips row per driver --&#xa;assigned + scheduled + in-progress -- ordered by eta" mermaidId="n:QUEUES" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="&lt;b&gt;load_driver_trip_queues&lt;/b&gt;&#xa;EVERY non-terminal live.trips row per driver --&#xa;assigned + scheduled + in-progress -- ordered by eta" id="5">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="93" width="435" x="188" y="455" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="&lt;b&gt;project_driver_state&lt;/b&gt; -- THE dynamic part&#xa;walks each driver&#39;s REAL trip queue forward from now,&#xa;one committed trip at a time -- 0, 1, or several" mermaidId="n:WALK" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="&lt;b&gt;project_driver_state&lt;/b&gt; -- THE dynamic part&#xa;walks each driver&#39;s REAL trip queue forward from now,&#xa;one committed trip at a time -- 0, 1, or several" id="6">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="93" width="452" x="180" y="598" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="In-progress trip: real TELEMETRY projection&#xa;position, HOS, truck % -- sim/sql/029" mermaidId="n:HOP1" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="In-progress trip: real TELEMETRY projection&#xa;position, HOS, truck % -- sim/sql/029" id="7">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="73" width="373" x="219" y="751" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="Scheduled or not-yet-started trip: the&#xa;ASSIGNMENT-TIME ESTIMATE -- planned driving/duty hours,&#xa;planned completion time" mermaidId="n:HOP2" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="Scheduled or not-yet-started trip: the&#xa;ASSIGNMENT-TIME ESTIMATE -- planned driving/duty hours,&#xa;planned completion time" id="8">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="93" width="482" x="642" y="741" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="Real idle-gap check: is there real time between&#xa;when this driver is free and the new pickup&#39;s decision_time --&#xa;a genuine 10h+ gap? Then DAILY clocks -- driving/duty --&#xa;are back to full, same as a real qualifying rest.&#xa;CYCLE clocks are never reset this way." mermaidId="n:REST" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="Real idle-gap check: is there real time between&#xa;when this driver is free and the new pickup&#39;s decision_time --&#xa;a genuine 10h+ gap? Then DAILY clocks -- driving/duty --&#xa;are back to full, same as a real qualifying rest.&#xa;CYCLE clocks are never reset this way." id="9">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="131" width="503" x="154" y="884" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="Real landing state AT the moment this driver&#xa;would actually be free -- position + 4 HOS clocks&#xa;+ truck %, dated to a real future instant" mermaidId="n:RESULT" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="Real landing state AT the moment this driver&#xa;would actually be free -- position + 4 HOS clocks&#xa;+ truck %, dated to a real future instant" id="10">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="93" width="409" x="201" y="1065" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="&lt;b&gt;build_candidates&lt;/b&gt; -- one Candidate per driver, FROM the projected state&#xa;deadhead to the new pickup, real OSRM, plus distance/hours to OWN home hub&#xa;-- current position AND this candidate&#39;s landing spot if chosen" mermaidId="n:BUILD" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="&lt;b&gt;build_candidates&lt;/b&gt; -- one Candidate per driver, FROM the projected state&#xa;deadhead to the new pickup, real OSRM, plus distance/hours to OWN home hub&#xa;-- current position AND this candidate&#39;s landing spot if chosen" id="11">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="93" width="633" x="89" y="1208" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="&lt;b&gt;feasible_candidates&lt;/b&gt; -- HARD HOS filter&#xa;legality check against the real projected 4-clock HOS state&#xa;illegal = removed, never scored" mermaidId="n:FEAS" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#f8cecc;strokeColor=#b85450;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="&lt;b&gt;feasible_candidates&lt;/b&gt; -- HARD HOS filter&#xa;legality check against the real projected 4-clock HOS state&#xa;illegal = removed, never scored" id="12">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#f8cecc;strokeColor=#b85450;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="93" width="483" x="164" y="1351" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="&lt;b&gt;score_candidate&lt;/b&gt;&#xa;score = immediate reward -- real $, risk, home-progress terms&#xa;plus gamma times V of the landing state&#xa;trained model: state_value_function_v2_home_progress" mermaidId="n:SCORE" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="&lt;b&gt;score_candidate&lt;/b&gt;&#xa;score = immediate reward -- real $, risk, home-progress terms&#xa;plus gamma times V of the landing state&#xa;trained model: state_value_function_v2_home_progress" id="13">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="112" width="508" x="152" y="1494" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="&lt;b&gt;rank_candidates&lt;/b&gt; -- sort by score, descending&#xa;rank 1 = highest score = who gets recommended" mermaidId="n:RANK" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#d0e0e3;strokeColor=#4a808a;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="&lt;b&gt;rank_candidates&lt;/b&gt; -- sort by score, descending&#xa;rank 1 = highest score = who gets recommended" id="14">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#d0e0e3;strokeColor=#4a808a;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="73" width="406" x="203" y="1656" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="live.quote_recommendations +&#xa;live.quote_candidate_snapshots&#xa;full audit trail, every candidate" mermaidId="n:TOPN" mermaidBaseStyle="html=1;shape=cylinder3;boundedLbl=1;backgroundOutline=1;size=10;strokeWidth=1;whiteSpace=wrap;fillColor=#d0e0e3;strokeColor=#4a808a;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="live.quote_recommendations +&#xa;live.quote_candidate_snapshots&#xa;full audit trail, every candidate" id="15">
+          <mxCell parent="1" style="html=1;shape=cylinder3;boundedLbl=1;backgroundOutline=1;size=10;strokeWidth=1;whiteSpace=wrap;fillColor=#d0e0e3;strokeColor=#4a808a;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="101" width="245" x="283" y="1779" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="Dispatcher sees ranked candidates, picks one, clicks Assign" mermaidId="n:UI" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#d0e0e3;strokeColor=#4a808a;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="Dispatcher sees ranked candidates, picks one, clicks Assign" id="16">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#d0e0e3;strokeColor=#4a808a;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="54" width="483" x="164" y="1930" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="/api/assign --&#xa;driver already has a pending trip?" mermaidId="n:CHECK" mermaidBaseStyle="rhombus;html=1;strokeWidth=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="/api/assign --&#xa;driver already has a pending trip?" id="17">
+          <mxCell parent="1" style="rhombus;html=1;strokeWidth=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="400" width="400" x="206" y="2034" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="status = assigned&#xa;current_trip_id updated&#xa;telemetry starts it immediately" mermaidId="n:NOW2" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="status = assigned&#xa;current_trip_id updated&#xa;telemetry starts it immediately" id="18">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="93" width="286" x="108" y="2503" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="status = scheduled&#xa;current_trip_id UNTOUCHED&#xa;queued behind what&#39;s already committed" mermaidId="n:LATER" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="status = scheduled&#xa;current_trip_id UNTOUCHED&#xa;queued behind what&#39;s already committed" id="19">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="93" width="356" x="444" y="2503" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="Telemetry: when the driver&#39;s CURRENT trip completes,&#xa;the earliest scheduled trip is promoted to assigned --&#xa;the real queue advances on its own" mermaidId="n:PROMOTE" mermaidBaseStyle="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" mermaidBaseValue="Telemetry: when the driver&#39;s CURRENT trip completes,&#xa;the earliest scheduled trip is promoted to assigned --&#xa;the real queue advances on its own" id="20">
+          <mxCell parent="1" style="html=1;whiteSpace=wrap;strokeWidth=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#1a1a1a;fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontSize=16;" vertex="1">
+            <mxGeometry height="93" width="452" x="180" y="2646" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:Q-&gt;ORDER#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="21">
+          <mxCell edge="1" parent="1" source="2" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="3">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:ORDER-&gt;FLEET#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="22">
+          <mxCell edge="1" parent="1" source="3" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="4">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:FLEET-&gt;QUEUES#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="23">
+          <mxCell edge="1" parent="1" source="4" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="5">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:QUEUES-&gt;WALK#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="24">
+          <mxCell edge="1" parent="1" source="5" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="6">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="queue empty -- idle now" mermaidId="e:WALK-&gt;REST#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);html=1;fontSize=16;labelBackgroundColor=light-dark(#E8E8E88D,#2a2a2a8D);fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontColor=light-dark(#333333,#cccccc);exitX=0.05;exitY=1;entryX=0.05;entryY=0;" mermaidBaseValue="queue empty -- idle now" id="25">
+          <mxCell edge="1" parent="1" source="6" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);html=1;fontSize=16;labelBackgroundColor=light-dark(#E8E8E88D,#2a2a2a8D);fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontColor=light-dark(#333333,#cccccc);exitX=0.05;exitY=1;entryX=0.05;entryY=0;" target="9">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points">
+                <mxPoint x="96" y="716" />
+                <mxPoint x="96" y="788" />
+                <mxPoint x="96" y="859" />
+              </Array>
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:WALK-&gt;HOP1#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="26">
+          <mxCell edge="1" parent="1" source="6" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="7">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:HOP1-&gt;REST#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="27">
+          <mxCell edge="1" parent="1" source="7" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="9">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:WALK-&gt;HOP2#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=1;exitY=0.86;entryX=0.5;entryY=0;" mermaidBaseValue="" id="28">
+          <mxCell edge="1" parent="1" source="6" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=1;exitY=0.86;entryX=0.5;entryY=0;" target="8">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points">
+                <mxPoint x="883" y="716" />
+              </Array>
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:HOP2-&gt;REST#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=1;entryY=0.14;" mermaidBaseValue="" id="29">
+          <mxCell edge="1" parent="1" source="8" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=1;entryY=0.14;" target="9">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points">
+                <mxPoint x="883" y="859" />
+              </Array>
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:REST-&gt;RESULT#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="30">
+          <mxCell edge="1" parent="1" source="9" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="10">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:RESULT-&gt;BUILD#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="31">
+          <mxCell edge="1" parent="1" source="10" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="11">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:BUILD-&gt;FEAS#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="32">
+          <mxCell edge="1" parent="1" source="11" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="12">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:FEAS-&gt;SCORE#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="33">
+          <mxCell edge="1" parent="1" source="12" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="13">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:SCORE-&gt;RANK#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="34">
+          <mxCell edge="1" parent="1" source="13" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="14">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:RANK-&gt;TOPN#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="35">
+          <mxCell edge="1" parent="1" source="14" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="15">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:TOPN-&gt;UI#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="36">
+          <mxCell edge="1" parent="1" source="15" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="16">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:UI-&gt;CHECK#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="" id="37">
+          <mxCell edge="1" parent="1" source="16" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="17">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points" />
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="No" mermaidId="e:CHECK-&gt;NOW2#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);html=1;fontSize=16;labelBackgroundColor=light-dark(#E8E8E88D,#2a2a2a8D);fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontColor=light-dark(#333333,#cccccc);exitX=0.17;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="No" id="38">
+          <mxCell edge="1" parent="1" source="17" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);html=1;fontSize=16;labelBackgroundColor=light-dark(#E8E8E88D,#2a2a2a8D);fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontColor=light-dark(#333333,#cccccc);exitX=0.17;exitY=1;entryX=0.5;entryY=0;" target="18">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points">
+                <mxPoint x="251" y="2469" />
+              </Array>
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="Yes" mermaidId="e:CHECK-&gt;LATER#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);html=1;fontSize=16;labelBackgroundColor=light-dark(#E8E8E88D,#2a2a2a8D);fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontColor=light-dark(#333333,#cccccc);exitX=0.96;exitY=1;entryX=0.5;entryY=0;" mermaidBaseValue="Yes" id="39">
+          <mxCell edge="1" parent="1" source="17" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);html=1;fontSize=16;labelBackgroundColor=light-dark(#E8E8E88D,#2a2a2a8D);fontFamily=Trebuchet MS,Verdana,Arial,sans-serif;fontColor=light-dark(#333333,#cccccc);exitX=0.96;exitY=1;entryX=0.5;entryY=0;" target="19">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points">
+                <mxPoint x="622" y="2469" />
+              </Array>
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:NOW2-&gt;PROMOTE#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.28;entryY=0;" mermaidBaseValue="" id="40">
+          <mxCell edge="1" parent="1" source="18" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.28;entryY=0;" target="20">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points">
+                <mxPoint x="251" y="2621" />
+              </Array>
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+        <UserObject label="" mermaidId="e:LATER-&gt;PROMOTE#0" mermaidBaseStyle="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.81;entryY=0;" mermaidBaseValue="" id="41">
+          <mxCell edge="1" parent="1" source="19" style="curved=1;startArrow=none;endArrow=block;endSize=7;strokeColor=light-dark(#333333,#cccccc);exitX=0.5;exitY=1;entryX=0.81;entryY=0;" target="20">
+            <mxGeometry relative="1" as="geometry">
+              <Array as="points">
+                <mxPoint x="622" y="2621" />
+              </Array>
+            </mxGeometry>
+          </mxCell>
+        </UserObject>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  </mxfile>

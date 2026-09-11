@@ -1,0 +1,16 @@
+pandas
+matplotlib
+openpyxl
+jupyter
+psycopg2-binary
+python-dotenv
+requests
+xgboost
+scikit-learn
+pytest
+shapely
+h3
+fastapi
+uvicorn[standard]
+reportlab
+scipy
