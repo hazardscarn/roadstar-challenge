@@ -11,6 +11,7 @@ frontend via supabase-js + RLS instead (sim/sql/032's INSERT grant on vehicle_in
 Run: `source venv/bin/activate && uvicorn dashboard.server.main:app --port 8787 --reload`
 (from the repo root, so `sim.*` imports resolve).
 """
+import os
 import sys
 import threading
 import uuid
@@ -35,9 +36,15 @@ from sim.live.score_quote import QuoteRequest, score_quote  # noqa: E402
 from sim.live.trip_demo_simulator import SCENARIOS, run_trip_demo, start_trip_demo  # noqa: E402
 
 app = FastAPI(title="RoadStar Dispatch API")
+# Local dev origins always allowed; the deployed frontend's origin (e.g. the Vercel domain) comes
+# from ALLOWED_ORIGINS (comma-separated) so going live doesn't need another code change -- just a
+# Railway env var. Note the deployed frontend normally reaches this API through Vercel's own
+# rewrite proxy (dashboard/vercel.json), which is same-origin from the browser's POV and never
+# triggers CORS at all -- this only matters for hitting the backend directly (previews, testing).
+_extra_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5183", "http://localhost:5173"],
+    allow_origins=["http://localhost:5183", "http://localhost:5173", *_extra_origins],
     allow_methods=["*"],
     allow_headers=["*"],
 )
