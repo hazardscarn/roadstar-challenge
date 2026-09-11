@@ -14,8 +14,14 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored to repo root (leading slash) -- the unanchored `lib/`/`lib64/` this template ships with
+# matches a folder named `lib` at ANY depth, which silently excluded dashboard/src/lib/ (the
+# frontend's api client/utils/auth-context/etc.) from every commit since the initial one -- found
+# live when a from-scratch Vercel build failed with ~9 files' worth of "Cannot find module
+# '@/lib/...'" errors that never showed up locally (local builds just use whatever's on disk,
+# gitignore only affects what gets committed).
+/lib/
+/lib64/
 parts/
 sdist/
 var/
