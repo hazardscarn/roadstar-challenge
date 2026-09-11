@@ -59,16 +59,25 @@ def _load_models_once() -> None:
     # load (remote DB queries + a pickle) -- load once at process start, reuse across requests,
     # matching how sim/live/score_quote.py's own CLI usage already does this.
     data = load_sim_data()
-    # v2 home-progress-retarget model (documents/logs/24) -- a real, statistically significant
-    # improvement (paired test: +10.8%, p=0.0068, 100 matched seeds) over the original, and now
-    # that live inference actually computes the home-progress features it needs (sim/live/
-    # score_quote.py's project_driver_state()/build_candidates(), documents/logs/23), there's a
-    # real feature pipeline behind it, not just a bigger model scoring the same old inputs.
-    # make_value_fn()'s _predict_state_value() is backward-compatible either way (only sets a
-    # feature if the loaded model's own feature_columns actually has that column name), so this
-    # swap alone -- no other code change -- is what activates the new model in both live scoring
-    # and the Simulation Showcase.
-    booster, cols = load_state_value_model(str(REPO_ROOT / "sim/training/state_value_function_v2_home_progress.pkl"))
+    # v4 hours-since-home model (documents/logs/27) -- swapped in after the home-time retarget's
+    # idle-timeout redesign + hours_since_home feature were built, retrained, and validated. A
+    # genuine, disclosed mixed result, not a clean win: the paired-comparison test shows a real,
+    # statistically significant total-reward regression (t=-2.416, p=0.0188, 60 matched seeds)
+    # against v2 -- NOT an artifact, confirmed unaffected by the two real backtest bugs found and
+    # fixed the same day (documents/logs/27's follow-up section). Weighed against that: real,
+    # strong improvements on every home-positioning metric once those bugs were fixed -- 36-62%
+    # closure of the real-data distance-to-home gap, 8.8% less deadhead, 100% missed-opportunity
+    # recovery, more even work distribution -- and `hours_since_home` earning real, nonzero
+    # feature importance (V(s) can now see the business-cadence signal directly, not just its
+    # indirect effect on past rewards). Swapped in on the user's explicit call (real revenue cost
+    # accepted for real driver-positioning gains), not because every metric came back clean.
+    # Live inference already computes the features this model needs (sim/live/score_quote.py's
+    # project_driver_state()/build_candidates() -- hours_since_home threaded through since
+    # documents/logs/25-26), and make_value_fn()'s _predict_state_value() is backward-compatible
+    # either way (only sets a feature if the loaded model's own feature_columns actually has that
+    # column name), so this swap alone -- no other code change -- activates the new model in both
+    # live scoring and the Simulation Showcase.
+    booster, cols = load_state_value_model(str(REPO_ROOT / "sim/training/state_value_function_v4_hours_since_home.pkl"))
     _state["data"] = data
     _state["value_fn"] = make_value_fn(booster, cols, data)
 
@@ -1418,6 +1427,129 @@ def reload_simulation_run(run_id: str):
     }
 
 
+def _compute_cycle(cur, run_id: str, driver_id: int, this_trip_id) -> dict | None:
+    """This trip's real CYCLE (home base -> home base) -- the persisted-data counterpart of
+    sim/engine/fleet_metrics.py's cycles_for_driver(): SAME closing rule (a cycle closes when a
+    trip's own destination IS the driver's home hub; runs to an ASSUMED close, priced via
+    get_route(), if the driver's real trip sequence for this run simply ends first), applied here
+    to find and return the ONE cycle a specific order's trip belongs to, with every trip in it --
+    not just the immediately-adjacent ones -- labeled P1/D1/P2/D2/... for the Order Story's cycle
+    view. Returns None only if this trip can't be found in the driver's own persisted trip list at
+    all (should not happen for a real trip_id from this same run).
+    """
+    from sim.config import ASSUMED_OPERATING_COST_PER_MILE
+    from sim.engine.run_sim import driver_home_hub_id
+
+    data = _state["data"]
+    home_hub_id = driver_home_hub_id(data, driver_id)
+
+    cur.execute(
+        """select t.trip_id, t.quote_id, t.origin_location_id, t.dest_location_id, t.eta,
+                  tl.completed_at, tl.order_revenue, t.pre_pickup_deadhead_miles,
+                  tl.post_delivery_deadhead_miles, t.loaded_miles
+           from simulation.trips t join simulation.trip_log tl on tl.trip_id = t.trip_id
+           where t.run_id = %s and t.driver_id = %s order by t.eta""",
+        (run_id, driver_id),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return None
+
+    cycles: list[list] = []
+    cur_cycle: list = []
+    for row in rows:
+        cur_cycle.append(row)
+        if row[3] == home_hub_id:  # dest_location_id -- closes right here, real paid trip
+            cycles.append(cur_cycle)
+            cur_cycle = []
+    if cur_cycle:
+        cycles.append(cur_cycle)  # never made it back home within this run's data -- ASSUMED close
+
+    this_cycle = next((c for c in cycles if any(r[0] == this_trip_id for r in c)), None)
+    if this_cycle is None:
+        return None
+
+    last_row = this_cycle[-1]
+    closed_via = 'trip' if last_row[3] == home_hub_id else 'assumed'
+    empty_return_miles = 0.0 if closed_via == 'trip' else get_route(data, last_row[3], home_hub_id)[0]
+
+    loc_ids = {home_hub_id}
+    for r in this_cycle:
+        loc_ids.add(r[2])
+        loc_ids.add(r[3])
+    cur.execute("select location_id, label from reference.locations where location_id = any(%s)", (list(loc_ids),))
+    labels = dict(cur.fetchall())
+
+    # Mid-cycle reload savings -- the SAME real per-trip $ value the order-book's "+$X saved"
+    # badge uses (api_simulation_run's deadhead_avoided_value_for()), scoped to consecutive trips
+    # WITHIN this one cycle, netting out the chosen candidate's own (usually near-zero, but not
+    # always exactly zero) deadhead against the average of the real OTHER candidates that next
+    # order actually had on the table -- the same formula Section 3's deadhead_vs_avg_alternative
+    # already uses, applied here to the NEXT trip in the cycle instead of this trip's own pickup.
+    quote_ids = [r[1] for r in this_cycle]  # native uuid.UUID objects -- quote_id is a uuid column, `= any(text[])` has no operator
+    cur.execute(
+        "select quote_id, driver_id, deadhead_miles, was_assigned from simulation.quote_candidate_snapshots where quote_id = any(%s)",
+        (quote_ids,),
+    )
+    candidates_by_quote: dict[str, list[tuple]] = {}
+    for c_quote_id, c_driver_id, c_deadhead, c_was_assigned in cur.fetchall():
+        candidates_by_quote.setdefault(str(c_quote_id), []).append((c_driver_id, float(c_deadhead or 0), bool(c_was_assigned)))
+
+    trips_out = []
+    for i, row in enumerate(this_cycle):
+        (r_trip_id, r_quote_id, r_origin, r_dest, r_eta, r_completed, r_revenue,
+         r_pre_dh, r_post_dh, r_loaded_miles) = row
+        # Real user feedback: "from Pn to Dn the path should be on but at 401 and all it's
+        # splitting into multipaths" -- the STORED trajectory (`r_traj`, used elsewhere for
+        # playback) is the truck's FULL real path -- pre-pickup DEADHEAD + pickup dwell + the
+        # loaded leg, concatenated (confirmed directly: trip_id b1060626...'s own trajectory[0] is
+        # London, not this trip's Milton origin, because that trip had 89mi of real deadhead
+        # first). Using it here meant a) the P/D pins landed at the wrong coordinates (trajectory
+        # endpoints are the deadhead START and the loaded-leg END, not the real pickup/drop-off),
+        # and b) drawing several cycle trips' FULL paths together bundled every trip's own deadhead
+        # leg back through the same shared corridor, reading as the road itself forking. Fetching
+        # the clean origin->dest geometry directly (the SAME real cached/live OSRM lookup every
+        # other route line in this app already uses, not a second implementation) gives exactly
+        # the P-to-D leg the labels promise, with no deadhead/dwell segment mixed in.
+        loaded_coords, _is_real_geometry = get_route_geometry(data, r_origin, r_dest)
+        clean_trajectory = [[float(idx), lat, lon] for idx, (lon, lat) in enumerate(loaded_coords)]
+        is_real_freight_move = float(r_loaded_miles or 0) >= 0.1
+        has_next_in_cycle = i < len(this_cycle) - 1
+        reload_immediate = is_real_freight_move and float(r_post_dh or 0) <= 0 and has_next_in_cycle
+        reload_savings_value = 0.0
+        if reload_immediate:
+            next_quote_id = str(this_cycle[i + 1][1])
+            next_candidates = candidates_by_quote.get(next_quote_id, [])
+            others = [dh for did, dh, was_assigned in next_candidates if not was_assigned]
+            chosen = next((dh for did, dh, was_assigned in next_candidates if was_assigned), 0.0)
+            if others:
+                avg_other = sum(others) / len(others)
+                reload_savings_value = max(0.0, avg_other - chosen) * ASSUMED_OPERATING_COST_PER_MILE
+        trips_out.append({
+            "trip_id": str(r_trip_id), "quote_id": str(r_quote_id), "is_current": r_trip_id == this_trip_id,
+            "pickup_label": f"P{i + 1}", "dropoff_label": f"D{i + 1}",
+            "origin_location_id": r_origin, "dest_location_id": r_dest,
+            "origin_label": labels.get(r_origin), "dest_label": labels.get(r_dest),
+            "assigned_at": r_eta.isoformat() if r_eta else None,
+            "completed_at": r_completed.isoformat() if r_completed else None,
+            "order_revenue": round(float(r_revenue or 0), 2),
+            "deadhead_miles": round(float(r_pre_dh or 0), 1),
+            "reload_immediate": reload_immediate,
+            "reload_savings_value": round(reload_savings_value, 2),
+            "trajectory": clean_trajectory,
+        })
+
+    return {
+        "home_hub_label": labels.get(home_hub_id),
+        "closed_via": closed_via,  # 'trip' (real paid delivery landed at home) | 'assumed' (still away when this run's data ends)
+        "empty_return_miles": round(empty_return_miles, 1),
+        "empty_return_value": round(empty_return_miles * ASSUMED_OPERATING_COST_PER_MILE, 2),
+        "n_trips": len(this_cycle),
+        "total_revenue": round(sum(float(r[6] or 0) for r in this_cycle), 2),
+        "trips": trips_out,
+    }
+
+
 @app.get("/api/simulation/orders/{quote_id}/story")
 def simulation_order_story(quote_id: str):
     """The "explain everything" drill-in real user feedback asked for: one order's whole real
@@ -1576,6 +1708,24 @@ def simulation_order_story(quote_id: str):
                 previous_trip = _adjacent_trip(cur, "<", "desc")
                 next_trip = _adjacent_trip(cur, ">", "asc")
 
+                # This trip's real CYCLE (home base -> home base) -- every trip this SAME driver
+                # took, in order, from the last time they were at home base through the next time
+                # they get back (or through the end of this run's data if they don't yet). The
+                # direct real-data counterpart of sim/engine/fleet_metrics.py's cycles_for_driver()
+                # (reused conceptually, not copy-pasted -- that one walks in-memory CompletedTrip
+                # objects at run time; this one walks the SAME driver's persisted rows on reload,
+                # since Order Story is always a reload-shaped read). Real user feedback: "order
+                # story should show all the trips driver took in that cycle instead of just before
+                # this and after... P1 P2... D1 D2... H" -- and: the order book's own "+$X saved"
+                # badge (reload_immediate) was showing on trips whose story never explained where
+                # the $ came from -- a real gap, not a display choice: Section 7's "Return leg"
+                # stat used to hardcode "$0" for a reloaded-immediately trip instead of the actual
+                # value avoided. Fixed by computing that SAME real figure here, once, and reusing
+                # it both on the cycle's own per-trip list and on `trip` itself below.
+                cycle = _compute_cycle(cur, run_id, driver_id, trip_id)
+                current_cycle_trip = next((t for t in cycle["trips"] if t["is_current"]), None) if cycle else None
+                reload_savings_value = current_cycle_trip["reload_savings_value"] if current_cycle_trip else 0.0
+
                 trip = {
                     "trip_id": str(trip_id), "driver_id": driver_id, "truck_number": truck_number,
                     "assigned_at": assigned_at.isoformat() if assigned_at else None,
@@ -1587,12 +1737,14 @@ def simulation_order_story(quote_id: str):
                     "post_delivery_deadhead_cost": round(float(post_dh_cost or 0), 2),
                     "post_delivery_deadhead_miles": round(float(post_dh_miles or 0), 1),
                     "reloaded_immediately": is_real_freight_move and float(post_dh_miles or 0) <= 0 and next_trip is not None,
+                    "reload_savings_value": round(reload_savings_value, 2),
                     "lateness_penalty": round(float(lateness_penalty or 0), 2),
                     "net_margin": round(float(net_margin or 0), 2),
                     "had_breakdown": bool(had_breakdown),
                     "geofence_events": geofence_events, "detention": detention, "invoice": invoice,
                     "trajectory": this_trajectory or [],
                     "previous_trip": previous_trip, "next_trip": next_trip,
+                    "cycle": cycle,
                 }
 
     return {

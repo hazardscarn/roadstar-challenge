@@ -1,23 +1,26 @@
+=== --restrict-drivers (main backtest, CORRECTED -- see documents/logs/27 follow-ups) ===
 Real usable dispatched orders: 1667 across 42 real drivers
 Real usable UNDISPATCHED orders (real CREATED_TIME, no real pickup ever happened): 130
 
-Running TRAINED replay (dispatched + undispatched merged)...
+--restrict-drivers: candidate pool limited from 131 to 42 drivers (the same 42 real drivers REAL used) -- both arms now share an identical driver pool.
+
+Running TRAINED replay (model=sim/training/state_value_function_v4_hours_since_home.pkl, dispatched + undispatched merged)...
 
 === Operational EVENT comparison (REAL dispatch vs. TRAINED model) ===
                                           REAL         TRAINED            Diff
 orders handled                           1,667           1,667              +0
 unassigned (TRAINED only)                  n/a               0                
-total deadhead miles                    30,766          30,364            -402
-avg deadhead miles/order                  18.5            18.2            -0.2
-orders w/ real deadhead leg              1,050           1,083             +33
+total deadhead miles                    30,766          28,056          -2,711
+avg deadhead miles/order                  18.5            16.8            -1.6
+orders w/ real deadhead leg              1,050           1,067             +17
 total loaded miles                      54,453          54,453              +0
 
 === $ comparison (revenue - deadhead cost ONLY -- the apples-to-apples subset) ===
                                           REAL         TRAINED            Diff
 total revenue                          229,688         229,688              +0
-total deadhead cost                     53,841          53,137            -704
-net (revenue - deadhead)               175,847         176,551            +704
-avg net/order                           105.49          105.91           +0.42
+total deadhead cost                     53,841          49,097          -4,744
+net (revenue - deadhead)               175,847         180,591          +4,744
+avg net/order                           105.49          108.33           +2.85
 
 === Missed-opportunity recovery (real was_dispatched=false orders, replayed against the SAME fleet state) ===
 Real orders with was_dispatched=false: 141 total; usable (real origin+dest+CREATED_TIME): 130
@@ -25,7 +28,84 @@ Real orders with was_dispatched=false: 141 total; usable (real origin+dest+CREAT
    location, matching classify_run_type()'s established category; correctly net ~$0 linehaul revenue)
   -> TRAINED found a feasible candidate for: 130/130 (100.0%)
   -> still no feasible candidate (genuinely no capacity, matching the real outcome): 0/130
-  -> net $ recovered on those 130 orders (revenue - deadhead cost): 10,509.41 CAD
-  -> avg $ recovered per recovered order: 80.84 CAD
-  -> excluding yard-shuttle moves, real FREIGHT opportunities recovered: 82, 10,617.67 CAD (129.48 CAD/order avg)
-  -> recovered bill_numbers: ['409068', '408872D', '408832D', '409141', '409192', '401260D', '408831D', '406701D', '406702D', '404735', '404241', '404736', '404238', '404734', '404239', '404732', '404244', '401715-AA', '408555D', '409146D', '408992D', '408360', '409431', '409277D', '409531', '409537', '409541', '409543', '409538', '409539', '409545', '409542', '409263D', '409342D', '409333D', '409595', '401473-AB', '401473-AA', '401473', '409236D', '409389D', '409387D', '409687', '409250D', '409278D', '409609D', '409899', '409699D', '409251D', '409251R', '409596D', '409763D', '409841D', '406419', '410230', '410277', '410278', '409930D', '410346', '410116D', '410363D', '410026D', '410881', '410393D', '410359D', '410360D', '410882', '410546T', '410546D', '411078', '411079', '410772D', '410856D', '410353D', '410951D', '410948D', '411030D', '411333', '411334', '410972D', '409392D', '411467', '411321D', '411556', '411557', '411620', '411619', '411629', '411628', '411325T', '411397D', '411396D', '411379D', '411838', '411841', '411837', '411601D', '411840', '411842', '411600D', '411472D', '412033', '412035', '412036', '412034', '411826D', '412057', '411700D', '411721D', '412128', '412251', '412253', '412252', '412266', '411982D', '411981D', '412318', '412140D', '412432', '412433', '412141D', '411974T', '412144D', '412290D', '412125T', '412264D', '412364D', '412510A', '412457D', '412457D-AA']
+  -> net $ recovered on those 130 orders (revenue - deadhead cost): 11,210.06 CAD
+  -> avg $ recovered per recovered order: 86.23 CAD
+  -> excluding yard-shuttle moves, real FREIGHT opportunities recovered: 82, 11,566.79 CAD (141.06 CAD/order avg)
+  -> recovered bill_numbers: ['409068', '408872D', '408832D', '409141', '401260D', '408831D', '409192', '406702D', '406701D', '404244', '404732', '404734', '404239', '404238', '404736', '404735', '404241', '401715-AA', '408555D', '409146D', '408992D', '408360', '409431', '409277D', '409531', '409542', '409539', '409538', '409537', '409541', '409545', '409543', '409263D', '409333D', '409342D', '409595', '401473-AA', '401473', '401473-AB', '409236D', '409389D', '409387D', '409687', '409278D', '409250D', '409609D', '409899', '409699D', '409251D', '409251R', '409596D', '409763D', '409841D', '406419', '410230', '410278', '410277', '409930D', '410346', '410116D', '410363D', '410026D', '410881', '410360D', '410393D', '410882', '410359D', '410546D', '410546T', '411079', '411078', '410772D', '410856D', '410353D', '410951D', '411030D', '410948D', '411334', '411333', '410972D', '409392D', '411467', '411321D', '411556', '411557', '411619', '411620', '411629', '411628', '411325T', '411397D', '411379D', '411396D', '411837', '411841', '411601D', '411840', '411842', '411600D', '411838', '411472D', '412034', '412033', '412035', '412036', '411826D', '412057', '411721D', '411700D', '412128', '412251', '412252', '412253', '412266', '411982D', '411981D', '412318', '412140D', '412432', '412433', '411974T', '412141D', '412144D', '412290D', '412125T', '412264D', '412364D', '412510A', '412457D', '412457D-AA']
+
+=== Home-base-return mechanism incidence on this REAL order sequence (1797 trips) ===
+  home_progress_bonus nonzero on: 26/1797 trips, total=2,601.20 CAD
+  cycle_end_stranding_penalty nonzero on: 0/1797 trips, total=0.00 CAD
+
+=== Driver utilization confound (checked directly, not assumed) ===
+  TRAINED replay uses 38/42 real drivers fleet-wide for all 1,797 orders (epsilon=0 -- pure greedy, no rotation/fairness constraint)
+  Of these SAME 42 real drivers: 4 get ZERO trips under TRAINED, 38 get at least one
+  A driver TRAINED never dispatches trivially shows distance-to-home=0 (never left) -- the FULL-42 numbers below are inflated by this; the RESTRICTED numbers (same 38 drivers, both arms) are the fair comparison.
+
+=== Work distribution across the same 42 real drivers ("does the model spread work out, or concentrate it?") ===
+                                                        REAL        TRAINED           Diff
+total trips                                            1,667          1,797           +130
+avg trips / driver                                      39.7           42.8           +3.1
+  min / max trips for any one driver                   1/166           0/74               
+  spread (std dev) across drivers                       39.5           23.9          -15.5
+total revenue ($)                                    229,688        243,277        +13,589
+avg revenue / driver ($)                               5,469          5,792           +324
+total work hours (deadhead+loaded)                     2,029          2,080            +51
+avg work hours / driver                                 48.3           49.5           +1.2
+
+(Lower spread/std-dev AND a higher min = work genuinely distributed more evenly across the same 42 drivers, not concentrated on a favored few -- the direct, measured answer to whether the model organically spreads work as part of its own optimization, under an identical driver pool.)
+
+=== Home-base-return OUTCOME metrics -- FULL 42 real drivers (includes 4 TRAINED never used -- inflated, see above) ===
+                                                               REAL        TRAINED           Diff
+distance to home at end of window (mi)                        1,111            477           -634
+  avg per driver (mi)                                          26.4           11.3          -15.1
+  as zero-revenue deadhead cost, if driven now ($)            1,943            834         -1,109
+  (4 of these 42 drivers got 0 TRAINED trips -- trivially "at home," inflating this number. See the RESTRICTED comparison below for the fair one.)
+
+=== Home-base-return OUTCOME metrics -- RESTRICTED to the 38 drivers TRAINED actually used (the fair comparison) ===
+                                                               REAL        TRAINED           Diff
+distance to home at end of window (mi)                          745            477           -268
+  avg per driver (mi)                                          19.6           12.5           -7.1
+  as zero-revenue deadhead cost, if driven now ($)            1,303            834           -469
+
+Interpretation: restricted to the 38 real drivers TRAINED actually dispatched at least once (so neither arm benefits from a trivial "never left home" zero), TRAINED leaves them closer to home by 268 total miles (36% of REAL's gap for this same subset) -- worth ~469 CAD. REAL's number here is still literal historical fact (no repositioning credited); TRAINED's comes from choosing which real revenue-paying load leaves the driver best positioned next, combined with the simulator's own realistic post-delivery repositioning assumption -- same two mechanisms as the full-set number above, just without the unused-driver inflation.
+
+=== Revenue earned on "homeward" legs -- RESTRICTED to the same 38 drivers ===
+                                                               REAL        TRAINED           Diff
+homeward-progressing legs (count)                               478            490            +12
+revenue earned on those legs ($)                             79,582         77,267         -2,315
+
+Interpretation: for the 38 real drivers TRAINED actually used, REAL's own real historical sequence earned $79,582 CAD on 478 real legs that, by chance or real dispatcher judgment, happened to also move a driver closer to home. TRAINED earned $77,267 CAD on 490 such legs -- $-2,315 CAD less. (For reference, the UNRESTRICTED full-42 total was $-2,653 CAD -- included here for transparency, not as the headline number, since it's subject to the same utilization-confound as the distance metric above.)
+
+=== STRICT sanity check: same 38 drivers, TRAINED limited to ONLY the identical 1,667 orders REAL was scored on (no recovered-order credit) ===
+                                                               REAL        TRAINED           Diff
+distance to home at end of window (mi)                          745            280           -465
+
+Interpretation: with the 130 recovered orders excluded entirely -- TRAINED scored on the exact same 38-driver, same-order set REAL was -- the home-base gap still closes by 62%. Confirms the earlier result is not just an artifact of TRAINED getting bonus orders REAL never had.
+
+=== --cycles (cycle-based analysis, FOUR TIMES CORRECTED -- see documents/logs/27 follow-ups; now verified byte-identical across reruns) ===
+Running cycle analysis (model=sim/training/state_value_function_v4_hours_since_home.pkl, matched 42-driver pool)...
+
+=== Cycle summary (a cycle = leaving home base, working, returning to home base -- EVERY cycle is closed, either by a real trip landing at home or an assumed empty return once the data runs out) ===
+                                                        REAL        TRAINED
+total cycles (all drivers)                               770           1094
+  closed by a real paid trip landing at home             648            664
+  closed by a real idle-timeout-driven leg               116            422
+  closed by an ASSUMED empty return (no trip)              6              8
+
+=== Per-cycle averages, ALL cycles (nothing excluded) ===
+                                                        REAL        TRAINED
+avg trips per cycle                                      2.2            1.6
+avg revenue per cycle (CAD)                              298            222
+avg empty return miles per cycle                        49.8           44.2
+avg HOS remaining at return (hrs)                        7.4            8.5
+avg cycle duration (calendar hrs)                       66.3           42.0
+
+"HOS remaining at return" = legal driving/duty hours still available but UNUSED once the driver is back home -- real, forgone capacity, reconstructed for REAL from the SAME seeded starting HOS condition TRAINED's own simulated fleet used (initialize_fleet(), seed=1), then walked forward through REAL's own actual_pickup/actual_delivery timestamps -- not an assumption about REAL, a real reconstruction from real data. TRAINED returns home with 1.1 more hours left unused per cycle than the other side. TRAINED's cycles run 24 calendar hours shorter on average (42h TRAINED vs 66h REAL), and REAL averages 0.5 more trips per cycle (1.6 TRAINED vs 2.2 REAL) -- reported directly from this run's own numbers, not assumed from a prior run's direction.
+
+Of REAL's 770 cycles: 648 closed via a real paid delivery landing at home (an actual, observed fact), 116 closed via the idle-timeout fairness check (documents/logs/27 follow-up) deciding REAL would have repositioned -- NOT observed in ground_truth.historical_orders, which has zero recorded empty-only legs; this is our own repositioning_outcome() decision applied to REAL's reconstructed idle gaps, same as it is for TRAINED -- and only 6 (1%) needed a plain ASSUMED empty return (the shared window truly ran out before any decision point). Of TRAINED's 1094: 664 trip-closed, 422 idle-timeout/post-delivery-closed (also not a historical fact -- a real, priced simulated distance), 8 (1%) assumed. All three counted in the empty-miles average above, tagged separately so they are not confused with each other.)
+
+=== By home hub ===
+  London (4 drivers): REAL 65 cycles (avg 1.2 trips, $64 rev, 23.9mi empty/cycle) vs. TRAINED 32 cycles (avg 1.2 trips, $76 rev, 20.8mi empty/cycle)
+  Milton (31 drivers): REAL 688 cycles (avg 2.0 trips, $323 rev, 47.6mi empty/cycle) vs. TRAINED 1054 cycles (avg 1.6 trips, $223 rev, 43.8mi empty/cycle)
+  hub #5719 (7 drivers): REAL 17 cycles (avg 14.5 trips, $196 rev, 238.8mi empty/cycle) vs. TRAINED 8 cycles (avg 3.5 trips, $659 rev, 195.7mi empty/cycle)

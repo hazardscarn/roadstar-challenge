@@ -19,9 +19,10 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from sim.config import ASSUMED_TARGET_HOURS_BETWEEN_HOME
 from sim.engine.hos import HOSLog
 from sim.engine.maintenance import TruckMaintenanceState
-from sim.engine.reward import _hos_urgency, compute_reward
+from sim.engine.reward import _business_home_urgency, _hos_urgency, combined_home_urgency, compute_reward
 
 
 def _fresh_hos(remaining_cycle1=70.0, remaining_cycle2=120.0):
@@ -208,3 +209,66 @@ def test_hos_hard_feasibility_unchanged_by_home_progress_args():
         hours_to_home_current=5.0, hours_to_home_landing=5.0,
     ))
     assert isinstance(r.total, float)  # scores fine regardless -- feasibility is a separate, untouched gate
+
+
+# --- Home-time retarget (documents/logs/25): _business_home_urgency() / combined_home_urgency() --
+# the real fix for this file's own header-comment finding (legal-cycle urgency alone never fires
+# in this fleet's real calibrated regime) -- a business "days since home" clock, independent of
+# legal HOS margin, combined via max() with the legal one so EITHER a real deadline or a normal
+# work-week cadence pulls toward home. ------------------------------------------------------------
+
+def test_business_urgency_is_zero_with_recent_home_time():
+    # Comfortably within the target cadence -- no pull yet, take revenue trips on their own merits.
+    assert _business_home_urgency(hours_since_home=6.0, hours_to_home=2.0) == 0.0
+
+
+def test_business_urgency_rises_as_hours_since_home_approaches_target():
+    early = _business_home_urgency(hours_since_home=12.0, hours_to_home=2.0)
+    near_target = _business_home_urgency(hours_since_home=ASSUMED_TARGET_HOURS_BETWEEN_HOME - 4, hours_to_home=2.0)
+    past_target = _business_home_urgency(hours_since_home=ASSUMED_TARGET_HOURS_BETWEEN_HOME + 20, hours_to_home=2.0)
+    assert early == 0.0
+    assert 0.0 < near_target < past_target <= 1.0
+
+
+def test_business_urgency_is_zero_when_already_home():
+    assert _business_home_urgency(hours_since_home=1000.0, hours_to_home=0.0) == 0.0
+
+
+def test_combined_urgency_is_the_max_of_legal_and_business():
+    # Legal margin comfortable, business cadence exceeded -- combined must reflect the business one.
+    loose_legal_tight_business = combined_home_urgency(
+        remaining_cycle_hours=60.0, hours_since_home=ASSUMED_TARGET_HOURS_BETWEEN_HOME + 30, hours_to_home=2.0,
+    )
+    assert loose_legal_tight_business > 0.0
+    assert loose_legal_tight_business == _business_home_urgency(ASSUMED_TARGET_HOURS_BETWEEN_HOME + 30, 2.0)
+
+    # Legal margin tight, business cadence comfortable -- combined must reflect the legal one
+    # (this IS the pre-existing mechanism, unchanged, this session's build only ADDS the business
+    # signal alongside it).
+    tight_legal_loose_business = combined_home_urgency(remaining_cycle_hours=2.0, hours_since_home=4.0, hours_to_home=2.0)
+    assert tight_legal_loose_business > 0.0
+    assert tight_legal_loose_business == _hos_urgency(2.0, 2.0)
+
+
+def test_combined_urgency_falls_back_to_legal_only_when_hours_since_home_is_none():
+    # Backward compat -- a caller that hasn't wired hours_since_home yet (or genuinely has no
+    # signal for it) degrades to exactly the pre-existing legal-only behavior, not a crash.
+    assert combined_home_urgency(2.0, None, 2.0) == _hos_urgency(2.0, 2.0)
+
+
+def test_reward_shaping_now_fires_in_a_normal_realistic_week_thanks_to_the_business_clock():
+    """THE real fix this whole file's own header comment (and documents/logs/24) reported as a
+    gap: with a REALISTIC, comfortable legal cycle margin (this fleet's real calibrated regime --
+    same 27h figure test_urgency_is_zero_with_comfortable_cycle_margin() above uses, where the
+    OLD legal-only mechanism produced 0.0 every single time), a driver who's simply been away from
+    home for close to a normal work week now gets a REAL, nonzero home_progress_bonus/
+    cycle_end_stranding_penalty -- the business clock firing where the legal one alone never did.
+    """
+    comfortable_legal_hos = _fresh_hos(remaining_cycle1=27.0, remaining_cycle2=60.0)
+    r = compute_reward(**_base_kwargs(
+        hos_state=comfortable_legal_hos,
+        distance_to_home_miles=70.0, distance_to_home_miles_landing=15.0,  # closes 55mi of the gap
+        hours_to_home_current=1.0, hours_to_home_landing=0.3,
+        hours_since_home=ASSUMED_TARGET_HOURS_BETWEEN_HOME + 10,  # a bit past a normal week away
+    ))
+    assert r.home_progress_bonus > 0.0

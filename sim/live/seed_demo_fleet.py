@@ -33,7 +33,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sim.db import cursor
-from sim.engine.run_sim import load_sim_data
+from sim.engine.run_sim import driver_home_hub_id, load_sim_data
 
 FLEET_SIZE = 30
 
@@ -169,32 +169,47 @@ def seed(seed_value: int = 11):
                 values (%s, %s, %s, %s, true, true, true, true, true, true)
             """, (driver_id, truck_number, now - timedelta(hours=rng.uniform(1, 6)), odometer_km))
 
+            # Home-time retarget (sim/sql/046, documents/logs/25): SYNTHESIZED -- no real "when did
+            # this driver last leave home" data exists to seed from. A driver seeded exactly AT
+            # their own home hub gets a recent, plausible arrival (they just got back); everyone
+            # else gets a real spread of past departure times (up to 10 days), so a freshly-seeded
+            # fleet shows genuine variation in home-time urgency from the first tick, not everyone
+            # starting at 0.
+            home_hub_id = driver_home_hub_id(data, driver_id)
+
             if not is_mid_route:
                 loc_id = rng.choice(hub_ids) if driver_id in hub_driver_ids else rng.choice(weighted_pool)
+                last_home_arrival_at = (
+                    now - timedelta(hours=rng.uniform(0.5, 6)) if loc_id == home_hub_id
+                    else now - timedelta(hours=rng.uniform(6, 24 * 10))
+                )
                 cur.execute("""
                     insert into live.driver_status
                       (driver_id, updated_at, last_location_id, hos_remaining_hours, duty_status,
                        current_trip_id, truck_number, trailer_type, trailer_capacity_lbs, trailer_capacity_pallets,
                        odometer_km, fuel_pct, hos_driving_hours_remaining, hos_duty_hours_remaining,
-                       hos_cycle1_hours_remaining, hos_cycle2_hours_remaining)
-                    values (%s, %s, %s, %s, 'off_duty', null, %s, 'Dry Van', 44500, 26, %s, %s, %s, %s, %s, %s)
+                       hos_cycle1_hours_remaining, hos_cycle2_hours_remaining, last_home_arrival_at)
+                    values (%s, %s, %s, %s, 'off_duty', null, %s, 'Dry Van', 44500, 26, %s, %s, %s, %s, %s, %s, %s)
                 """, (driver_id, now, loc_id, hos_remaining, truck_number, odometer_km, rng.uniform(55, 100),
-                      hos_driving_remaining, hos_duty_remaining, hos_cycle1_remaining, hos_cycle2_remaining))
+                      hos_driving_remaining, hos_duty_remaining, hos_cycle1_remaining, hos_cycle2_remaining,
+                      last_home_arrival_at))
             else:
                 trip_id = uuid.uuid4()
                 origin_loc = rng.choice(weighted_pool)
                 dest_loc = rng.choice(weighted_pool)
                 eta = now + timedelta(hours=rng.uniform(0.5, 4.0))
                 projected_hos = max(0.0, hos_remaining - rng.uniform(1.0, 3.0))
+                last_home_arrival_at = now - timedelta(hours=rng.uniform(6, 24 * 10))  # mid-route -- not home right now
                 cur.execute("""
                     insert into live.driver_status
                       (driver_id, updated_at, last_location_id, hos_remaining_hours, duty_status,
                        current_trip_id, truck_number, trailer_type, trailer_capacity_lbs, trailer_capacity_pallets,
                        odometer_km, fuel_pct, hos_driving_hours_remaining, hos_duty_hours_remaining,
-                       hos_cycle1_hours_remaining, hos_cycle2_hours_remaining)
-                    values (%s, %s, null, %s, 'driving', %s, %s, 'Dry Van', 44500, 26, %s, %s, %s, %s, %s, %s)
+                       hos_cycle1_hours_remaining, hos_cycle2_hours_remaining, last_home_arrival_at)
+                    values (%s, %s, null, %s, 'driving', %s, %s, 'Dry Van', 44500, 26, %s, %s, %s, %s, %s, %s, %s)
                 """, (driver_id, now, hos_remaining, trip_id, truck_number, odometer_km, rng.uniform(40, 90),
-                      hos_driving_remaining, hos_duty_remaining, hos_cycle1_remaining, hos_cycle2_remaining))
+                      hos_driving_remaining, hos_duty_remaining, hos_cycle1_remaining, hos_cycle2_remaining,
+                      last_home_arrival_at))
                 # status='in_transit' (not the sim schema's legacy 'in_progress') -- this is the
                 # exact vocabulary sim/live/telemetry_simulator.py's lifecycle drives, so a
                 # freshly-seeded mid-route driver is immediately picked up and moved for real.

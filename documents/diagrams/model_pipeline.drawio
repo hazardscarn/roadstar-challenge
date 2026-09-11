@@ -200,7 +200,7 @@
   </diagram>
 
   <diagram name="3 Reward Function" id="reward">
-    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1480" pageHeight="680" math="0" shadow="0">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1480" pageHeight="1040" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -232,15 +232,18 @@
         <mxCell id="rc6" value="expected_lateness_penalty&#xa;&#xa;Question: will this driver&#xa;actually arrive on time?&#xa;&#xa;Computed: real routed ETA vs.&#xa;the promised pickup time;&#xa;penalty grows faster the later&#xa;it runs (convex, not linear)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="390" y="390" width="330" height="180" as="geometry" />
         </mxCell>
-        <mxCell id="rc7" value="cycle_end_stranding_penalty&#xa;&#xa;Question: could this trip leave&#xa;the driver stranded once their&#xa;weekly/bi-weekly legal hours&#xa;run out?&#xa;&#xa;Computed: fires only when the&#xa;LANDING state is both close to&#xa;the legal cycle limit AND still&#xa;far from home base" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+        <mxCell id="rc7" value="cycle_end_stranding_penalty&#xa;&#xa;Question: could this trip leave&#xa;the driver stranded with too&#xa;little legal time OR business&#xa;home-cadence margin left?&#xa;&#xa;Computed: fires when the LANDING&#xa;state is close to EITHER the legal&#xa;cycle limit OR the ~weekly home-&#xa;cadence target, and still far&#xa;from home base (documents/logs/25-26)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="740" y="390" width="330" height="180" as="geometry" />
         </mxCell>
-        <mxCell id="rc8" value="home_progress_bonus&#xa;&#xa;Question: does this trip help&#xa;work the driver back toward&#xa;base, or away from it?&#xa;&#xa;Computed: rewards PARTIAL,&#xa;PROPORTIONAL progress toward&#xa;home -- weighted by how&#xa;urgently it's actually needed,&#xa;not a flat bonus every time" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;fontStyle=1;align=left;spacingLeft=10;" vertex="1" parent="1">
+        <mxCell id="rc8" value="home_progress_bonus&#xa;&#xa;Question: does this trip help&#xa;work the driver back toward&#xa;base, or away from it?&#xa;&#xa;Computed: rewards PARTIAL,&#xa;PROPORTIONAL progress toward&#xa;home -- weighted by combined&#xa;urgency = max(legal cycle margin,&#xa;business days-since-home), not&#xa;a flat bonus every time" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;fontStyle=1;align=left;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="1090" y="390" width="350" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="rc9" value="Home-time retarget (documents/logs/25-26)&#xa;&#xa;Legal-cycle urgency alone was measured&#xa;DORMANT (0/8,990 trips, log 24) -- a normal&#xa;simulated week never nears the 70h/7-day&#xa;or 120h/14-day limit. combined_home_urgency&#xa;= max(legal, business &quot;hours since home&quot;&#xa;vs. a ~168h target) makes this signal fire&#xa;under REALISTIC conditions, not just a legal&#xa;cliff. hours_since_home is now also a DIRECT&#xa;trained V(s) feature (sim/sql/047), not only&#xa;an indirect effect baked into realized reward.&#xa;&#xa;A real, simulated &quot;don't stay idle&quot; event backs&#xa;this: a driver who finishes a trip and gets&#xa;nothing new checks again every 24h (reusing&#xa;the same repositioning_outcome() decision the&#xa;post-delivery moment already uses) -- defaults&#xa;to repositioning toward freight opportunity&#xa;(nearest hub) absent real urgency, and only&#xa;targets home once urgency crosses threshold&#xa;-- a real, HOS-legal, priced empty leg, not a&#xa;post-hoc analysis number." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="740" y="600" width="650" height="330" as="geometry" />
         </mxCell>
 
         <mxCell id="rlegend" value="Legend" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#666666;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="40" y="600" width="1400" height="60" as="geometry" />
+          <mxGeometry x="40" y="960" width="1400" height="60" as="geometry" />
         </mxCell>
         <mxCell id="rl1" value="" style="rounded=0;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="rlegend">
           <mxGeometry x="20" y="30" width="24" height="14" as="geometry" />
@@ -271,7 +274,7 @@
   </diagram>
 
   <diagram name="4 Feature Space" id="features">
-    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1480" pageHeight="720" math="0" shadow="0">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1480" pageHeight="750" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -283,19 +286,19 @@
         <mxCell id="leftPanelHdr" value="V(s) -- Position-Only State&#xa;&quot;How good is it to simply BE here, right now -- independent of which order comes next?&quot;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;fontStyle=1;align=center;" vertex="1" parent="1">
           <mxGeometry x="40" y="80" width="680" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="leftPanelBody" value="POSITION &amp; GEOGRAPHY&#xa;&#8226; Region (H3 hexagonal cell of current location)&#xa;&#8226; Distance to the driver's own home terminal&#xa;&#xa;HOURS OF SERVICE&#xa;&#8226; Remaining hours (binding limit across all 5 real clocks)&#xa;&#8226; Remaining 7-day cycle hours, tracked separately&#xa;&#8226; Remaining 14-day cycle hours, tracked separately&#xa;&#xa;TIME&#xa;&#8226; Hour of day  &#8226;  Day of week&#xa;&#xa;TRUCK CONDITION&#xa;&#8226; % of maintenance interval used (distance-based)&#xa;&#8226; % of maintenance interval used (calendar-based)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f9ff;strokeColor=#6c8ebf;fontSize=12;align=left;verticalAlign=top;spacingLeft=15;spacingTop=15;" vertex="1" parent="1">
-          <mxGeometry x="40" y="160" width="680" height="410" as="geometry" />
+        <mxCell id="leftPanelBody" value="POSITION &amp; GEOGRAPHY&#xa;&#8226; Region (H3 hexagonal cell of current location)&#xa;&#8226; Distance to the driver's own home terminal&#xa;&#8226; Hours since the driver was last AT home terminal&#xa;  (business cadence, sim/sql/047 -- documents/logs/25-26)&#xa;&#xa;HOURS OF SERVICE&#xa;&#8226; Remaining hours (binding limit across all 5 real clocks)&#xa;&#8226; Remaining 7-day cycle hours, tracked separately&#xa;&#8226; Remaining 14-day cycle hours, tracked separately&#xa;&#xa;TIME&#xa;&#8226; Hour of day  &#8226;  Day of week&#xa;&#xa;TRUCK CONDITION&#xa;&#8226; % of maintenance interval used (distance-based)&#xa;&#8226; % of maintenance interval used (calendar-based)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f9ff;strokeColor=#6c8ebf;fontSize=12;align=left;verticalAlign=top;spacingLeft=15;spacingTop=15;" vertex="1" parent="1">
+          <mxGeometry x="40" y="160" width="680" height="440" as="geometry" />
         </mxCell>
 
         <mxCell id="rightPanelHdr" value="Q(s,a) -- Candidate-Specific Features&#xa;&quot;Given THIS driver, THIS truck, and THIS order -- how good a match is it?&quot;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;align=center;" vertex="1" parent="1">
           <mxGeometry x="760" y="80" width="680" height="70" as="geometry" />
         </mxCell>
         <mxCell id="rightPanelBody" value="THIS DECISION'S ECONOMICS&#xa;&#8226; Pre-pickup deadhead miles &amp; hours&#xa;&#8226; Order weight, pallets, load type&#xa;&#8226; Load fill ratio (weight vs. pallet-space, whichever binds)&#xa;&#8226; FTL vs. LTL service type&#xa;&#xa;TIMING &amp; LEGALITY&#xa;&#8226; Planned driving hours / planned duty hours&#xa;&#8226; Real routed ETA vs. promised pickup time&#xa;&#xa;DESTINATION CONTEXT&#xa;&#8226; Distance from the delivery point to the nearest hub&#xa;&#8226; Local order density near the delivery point&#xa;&#xa;FLEET CONTEXT&#xa;&#8226; This specific truck's breakdown risk&#xa;&#8226; Total distance this decision commits the driver to&#xa;&#8226; Size of this driver's available truck pool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5fff5;strokeColor=#82b366;fontSize=12;align=left;verticalAlign=top;spacingLeft=15;spacingTop=15;" vertex="1" parent="1">
-          <mxGeometry x="760" y="160" width="680" height="410" as="geometry" />
+          <mxGeometry x="760" y="160" width="680" height="440" as="geometry" />
         </mxCell>
 
         <mxCell id="connectNote" value="Together: score(candidate) = reward(THIS decision's features, right panel) + &#947; &#215; V(the position this decision leaves you in, left panel)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="40" y="600" width="1400" height="70" as="geometry" />
+          <mxGeometry x="40" y="630" width="1400" height="70" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

@@ -79,6 +79,7 @@ def extract(sim_id: str | None = None) -> int:
               a.next_hos_cycle1_remaining, a.next_hos_cycle2_remaining,
               a.distance_to_home_miles, a.distance_to_home_miles_landing,
               a.home_progress_bonus, a.cycle_end_stranding_penalty,
+              a.hours_since_home, a.hours_since_home_landing,
               o.order_id, o.weight_lbs, o.load_type, o.revenue, o.service_type, o.loaded_miles,
               o.dest_location_id, o.dest_distance_to_hub_km, o.dest_local_order_density, o.promised_delivery_at,
               te.completed_at
@@ -110,6 +111,7 @@ def extract(sim_id: str | None = None) -> int:
         next_hos_cycle1_remaining, next_hos_cycle2_remaining,
         distance_to_home_miles, distance_to_home_miles_landing,
         home_progress_bonus, cycle_end_stranding_penalty,
+        hours_since_home, hours_since_home_landing,
         order_id, weight_lbs, load_type, order_revenue, service_type, order_loaded_miles,
         dest_location_id, dest_distance_to_hub_km, dest_local_order_density, promised_delivery_at, completed_at,
     ) in rows:
@@ -167,6 +169,7 @@ def extract(sim_id: str | None = None) -> int:
             next_hos_cycle1_remaining, next_hos_cycle2_remaining,
             distance_to_home_miles, distance_to_home_miles_landing,
             home_progress_bonus_f, cycle_end_stranding_penalty_f,
+            hours_since_home, hours_since_home_landing,
         ))
 
     with cursor(local=True) as cur:
@@ -196,14 +199,15 @@ def extract(sim_id: str | None = None) -> int:
                  next_hos_driving_remaining, next_hos_duty_remaining,
                  next_hos_cycle1_remaining, next_hos_cycle2_remaining,
                  distance_to_home_miles, distance_to_home_miles_landing,
-                 home_progress_bonus, cycle_end_stranding_penalty
+                 home_progress_bonus, cycle_end_stranding_penalty,
+                 hours_since_home, hours_since_home_landing
                ) values %s""",
             transitions,
             template="""(
                  %s, %s, %s, ST_GeogFromText(%s), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, ST_GeogFromText(%s), %s, %s,
                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                )""",
             page_size=5000,
         )

@@ -130,6 +130,14 @@ class LiveDriverRow:
     trailer_capacity_lbs: int
     trailer_capacity_pallets: int
     home_terminal_zone: str | None
+    # Home-time retarget (sim/sql/046, documents/logs/25): the real last moment this driver was AT
+    # their own home hub -- written by telemetry_simulator.py's _complete_trip(). Like updated_at,
+    # this is only ever a STARTING point -- project_driver_state() projects it FORWARD through the
+    # driver's real trip queue, since a queued future trip landing at home changes it before the
+    # quote being scored ever gets decided. None for a driver seeded before sim/sql/046 -- falls
+    # back to updated_at (their last known state) rather than crashing, same tolerant pattern the
+    # HOS sub-clocks above use for a driver seeded before sim/sql/042.
+    last_home_arrival_at: datetime | None = None
     # From live.truck_maintenance_state:
     truck_pct_km_interval: float = 0.0
     truck_pct_days_interval: float = 0.0
@@ -168,6 +176,11 @@ class ProjectedDriverState:
     hos_cycle2_hours_remaining: float
     truck_pct_km_interval: float
     truck_pct_days_interval: float
+    # Home-time retarget (documents/logs/25): the real last-at-home moment, CHAIN-WALKED forward
+    # through this driver's real trip queue exactly like landing_time/hos_* above -- if a queued
+    # trip lands at home before the trip being scored, this reflects that projected arrival, not
+    # whatever the driver's live.driver_status row happened to say at query time.
+    last_home_at: datetime
 
 
 def load_live_fleet_snapshot() -> tuple[list[LiveDriverRow], int]:
@@ -213,7 +226,7 @@ def load_live_fleet_snapshot() -> tuple[list[LiveDriverRow], int]:
               ds.hos_driving_hours_remaining, ds.hos_duty_hours_remaining,
               ds.hos_cycle1_hours_remaining, ds.hos_cycle2_hours_remaining, ds.updated_at,
               ds.last_location_id, ds.trailer_type, ds.trailer_capacity_lbs, ds.trailer_capacity_pallets,
-              gd.terminal_zone,
+              gd.terminal_zone, ds.last_home_arrival_at,
               tm.cumulative_km_since_service, tm.service_interval_km,
               tm.last_service_at, tm.service_interval_days, tm.maintenance_until
             from live.driver_status ds
@@ -235,7 +248,7 @@ def load_live_fleet_snapshot() -> tuple[list[LiveDriverRow], int]:
     fleet = []
     for r in rows:
         (driver_id, truck_number, duty_status, hos_remaining, hos_driving, hos_duty, hos_cycle1, hos_cycle2, updated_at,
-         last_location_id, trailer_type, cap_lbs, cap_pallets, terminal_zone,
+         last_location_id, trailer_type, cap_lbs, cap_pallets, terminal_zone, last_home_arrival_at,
          cum_km, interval_km, last_service_at, interval_days, maint_until) = r
 
         pct_km = float(cum_km) / float(interval_km) if cum_km is not None and interval_km else 0.0
@@ -262,6 +275,7 @@ def load_live_fleet_snapshot() -> tuple[list[LiveDriverRow], int]:
             home_terminal_zone=terminal_zone,
             truck_pct_km_interval=pct_km, truck_pct_days_interval=pct_days,
             truck_maintenance_until=maint_until,
+            last_home_arrival_at=last_home_arrival_at,
         ))
     return fleet, n_excluded_for_inspection
 
@@ -328,7 +342,7 @@ def _trip_start_time(trip: QueuedTrip) -> datetime:
 
 
 def project_driver_state(
-    drv: LiveDriverRow, trip_queue: list[QueuedTrip], now: datetime, pickup_at: datetime,
+    drv: LiveDriverRow, trip_queue: list[QueuedTrip], now: datetime, pickup_at: datetime, home_hub_id: int,
 ) -> tuple[ProjectedDriverState, QueuedTrip | None] | None:
     """Walks a driver's REAL trip queue forward from their real current state, applying each
     ALREADY-SETTLED trip's known-or-projected effect on position/HOS/truck condition in sequence
@@ -399,6 +413,13 @@ def project_driver_state(
     # forward through every SETTLED already-committed trip below (anything still open past
     # pickup_at is deliberately excluded from this walk -- see docstring).
     landing_time = drv.updated_at
+    # Home-time retarget (documents/logs/25): CHAIN-WALKED forward through the queue exactly like
+    # landing_time/hos_* above -- a queued trip that lands at home BEFORE the trip being scored
+    # must update this, not the driver's live.driver_status row (which only reflects reality up
+    # to NOW, not a future already-committed booking) -- the user's own explicit correction: "this
+    # last at home feature have to be dynamically added... in future trip assignments this also
+    # updates so next calc will know this."
+    last_home_at = drv.last_home_arrival_at or drv.updated_at
 
     for trip in settled:
         location_id = trip.dest_location_id
@@ -435,6 +456,9 @@ def project_driver_state(
             # for a not-yet-started trip without the sim's TruckMaintenanceState machinery running
             # live-side. Flagged, not silently guessed (see this module's header comment).
 
+        if trip.dest_location_id == home_hub_id:
+            last_home_at = landing_time  # this settled trip's own landing time IS a real home arrival
+
     # Real idle-gap qualifying-rest assumption (see docstring) -- this driver can't actually
     # depart for the NEW pickup before `now` (the decision hasn't happened yet) even if they were
     # free earlier, so the earliest real departure is max(landing_time, now); if that gap is a
@@ -450,6 +474,7 @@ def project_driver_state(
         hos_driving_hours_remaining=hos_driving, hos_duty_hours_remaining=hos_duty,
         hos_cycle1_hours_remaining=hos_cycle1, hos_cycle2_hours_remaining=hos_cycle2,
         truck_pct_km_interval=truck_pct_km, truck_pct_days_interval=truck_pct_days,
+        last_home_at=last_home_at,
     ), next_trip
 
 
@@ -479,8 +504,9 @@ def build_candidates(data: SimData, fleet: list[LiveDriverRow], order: Order, no
     Home-base-return features (distance/hours to the driver's OWN home terminal, current position
     AND this candidate's landing spot if chosen) computed identically to sim/engine/run_sim.py's
     own DISPATCH_DECISION loop -- same driver_home_hub_id()/get_route() calls, cached per home hub
-    (only 2 real hubs exist) so this costs at most 2 extra real route lookups per order arrival
-    regardless of fleet size, not one per candidate.
+    (up to 4 real anchor points -- calibration.driver_home_hub, documents/logs/25) so this costs
+    at most a handful of extra real route lookups per order arrival regardless of fleet size, not
+    one per candidate.
     """
     trip_queues = load_driver_trip_queues([drv.driver_id for drv in fleet])
     home_hub_landing_cache: dict[int, tuple[float, float]] = {}
@@ -490,13 +516,17 @@ def build_candidates(data: SimData, fleet: list[LiveDriverRow], order: Order, no
         if drv.truck_maintenance_until is not None and drv.truck_maintenance_until > now:
             continue  # truck in the shop -- matches pick_pool_truck()'s check in the sim
 
+        # home_hub_id computed BEFORE project_driver_state() -- the chain-walk needs it to detect
+        # a queued trip that lands at home before the trip being scored (documents/logs/25).
+        home_hub_id = driver_home_hub_id(data, drv.driver_id)
+
         # project_driver_state() is the real availability check (documents/logs -- the dynamic-
         # feature-space sketch this implements): None means this driver is genuinely unroutable
         # OR already busy AT the requested pickup moment (still out on a trip that hasn't ended by
         # then, or one that will already have STARTED by then) -- not a candidate at all, matching
         # a real dispatcher's own constraint. order.requested_pickup_at, not decision_time/now, is
         # the moment that must be free -- decision_time can be up to a day earlier.
-        result = project_driver_state(drv, trip_queues.get(drv.driver_id, []), now, order.requested_pickup_at)
+        result = project_driver_state(drv, trip_queues.get(drv.driver_id, []), now, order.requested_pickup_at, home_hub_id)
         if result is None:
             continue
         proj, next_trip = result
@@ -530,11 +560,14 @@ def build_candidates(data: SimData, fleet: list[LiveDriverRow], order: Order, no
         planned_driving = dh_hours + order.loaded_hours
         planned_duty = planned_driving + 1.5  # matches run_sim.py's own feasibility-only dwell estimate
 
-        home_hub_id = driver_home_hub_id(data, drv.driver_id)
         home_miles_now, home_hours_now = get_route(data, proj.location_id, home_hub_id)
         if home_hub_id not in home_hub_landing_cache:
             home_hub_landing_cache[home_hub_id] = get_route(data, order.dest_location_id, home_hub_id)
         home_miles_landing, home_hours_landing = home_hub_landing_cache[home_hub_id]
+        # Home-time retarget (documents/logs/25): real hours since this driver was last AT home,
+        # as of this candidate's own effective_start -- proj.last_home_at is already the CHAIN-
+        # WALKED projection (project_driver_state()), not a static real-time-only value.
+        hours_since_home = max(0.0, (proj.effective_start - proj.last_home_at).total_seconds() / 3600)
 
         candidates.append(Candidate(
             driver_id=drv.driver_id, truck_number=drv.truck_number, hos_state=hos_state,
@@ -543,6 +576,7 @@ def build_candidates(data: SimData, fleet: list[LiveDriverRow], order: Order, no
             pre_pickup_deadhead_hours=dh_hours, location_id=proj.location_id, effective_start=proj.effective_start,
             distance_to_home_miles=home_miles_now, distance_to_home_miles_landing=home_miles_landing,
             hours_to_home_current=home_hours_now, hours_to_home_landing=home_hours_landing,
+            hours_since_home=hours_since_home,
         ))
     return candidates
 
@@ -608,10 +642,10 @@ def score_quote(quote: QuoteRequest, data: SimData | None = None, value_fn=None,
     if data is None:
         data = load_sim_data()
     if value_fn is None:
-        # v2 home-progress-retarget model (documents/logs/24) -- same one dashboard/server/main.py
-        # loads at startup; kept in sync so a standalone/test call of score_quote() without an
-        # explicit value_fn scores identically to the live app.
-        booster, cols = load_state_value_model('sim/training/state_value_function_v2_home_progress.pkl')
+        # v4 hours-since-home model (documents/logs/27) -- same one dashboard/server/main.py loads
+        # at startup; kept in sync so a standalone/test call of score_quote() without an explicit
+        # value_fn scores identically to the live app.
+        booster, cols = load_state_value_model('sim/training/state_value_function_v4_hours_since_home.pkl')
         value_fn = make_value_fn(booster, cols, data)
 
     fleet, n_excluded_for_inspection = load_live_fleet_snapshot()

@@ -1,6 +1,6 @@
 <mxfile host="app.diagrams.net">
   <diagram name="Results" id="results1">
-    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="2080" math="0" shadow="0">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="1850" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -12,355 +12,302 @@
           <mxGeometry x="60" y="58" width="1380" height="26" as="geometry" />
         </mxCell>
 
+
+        <mxCell id="model_banner" value="Model: state_value_function_v4_hours_since_home.pkl (documents/logs/27) -- NOW the deployed live model (dashboard/server/main.py, sim/live/score_quote.py), swapped in on the user's explicit call after this backtest picture and the disclosed paired-comparison revenue tradeoff were both weighed. Numbers below were corrected THREE TIMES after direct, sustained user pushback (&quot;something is off&quot;) surfaced four real bugs: REAL not judged by the same idle-timeout standard as TRAINED, TRAINED's own undercounting bug, empty-miles only pricing the cycle-closing leg, and TRAINED's cycle reconstruction dropping the 130 recovered orders it's credited for elsewhere -- plus a real RNG non-determinism bug. All fixed; see documents/logs/27's follow-ups." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4CC;strokeColor=#D79B00;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="84" width="1380" height="40" as="geometry" />
+        </mxCell>
         <!-- ===== Glossary ===== -->
         <mxCell id="gloss_hdr" value="How to Read These Results: What a &quot;Cycle&quot; Is" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="100" width="1380" height="35" as="geometry" />
+          <mxGeometry x="60" y="130" width="1380" height="35" as="geometry" />
         </mxCell>
-        <mxCell id="gloss_body" value="&#8226; CYCLE: one full loop for a driver -- leaving home base, working a sequence of real trips, and returning to home base. Every cycle is closed one of two ways; there is no &quot;incomplete, excluded&quot; case.&#xa;&#8226; Closed by a real paid trip: a real order's own destination happens to BE the driver's home hub -- 0 empty miles, the trip itself completed the return.&#xa;&#8226; Closed by a real SIMULATED deadhead leg (TRAINED only): the simulator's own post-delivery repositioning mechanic puts the driver at the home hub while more of the data window remains -- a real, priced empty distance, not a guess.&#xa;&#8226; Closed by an ASSUMED empty return (&quot;no trip&quot;): the driver is not observed back at home base by the time the data runs out -- that remaining gap to home IS the empty-return-miles metric, priced at real routed distance. REAL can ONLY ever close a cycle this way or via a real paid trip -- it has no record of an empty-only leg at all, so an assumed return is REAL's only way to represent &quot;didn't find a load home.&quot;&#xa;&#8226; HOS remaining at return: legal driving/duty hours still available but UNUSED once back home -- real forgone capacity. Reconstructed for REAL from the SAME seeded starting HOS condition TRAINED's own simulated fleet uses (identical random seed), walked forward through REAL's own actual pickup/delivery timestamps -- a real reconstruction, not an assumption about REAL.&#xa;&#8226; All 42 of these real drivers show home hub = London in the source data (none = Milton) -- there is no real Milton/London split to show for this specific driver subset." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;verticalAlign=top;spacingLeft=15;spacingTop=12;spacingRight=15;" vertex="1" parent="1">
-          <mxGeometry x="60" y="137" width="1380" height="230" as="geometry" />
+        <mxCell id="gloss_body" value="&#8226; CYCLE: one full loop for a driver -- leaving home base, working a sequence of real trips, and returning to home base. Every cycle is closed one of three ways; there is no &quot;incomplete, excluded&quot; case.&#xa;&#8226; Closed by a real paid trip: a real order's own destination happens to BE the driver's home hub -- 0 empty miles, the trip itself completed the return.&#xa;&#8226; Closed by a real SIMULATED deadhead leg (BOTH arms): whenever a driver goes idle without a next job lined up, the SAME repositioning_outcome() decision (documents/logs/25-27) checks every 24h whether they'd reposition -- toward their own home hub once real urgency justifies it, otherwise the nearest hub -- priced as a real empty distance, not a guess. REAL was NOT held to this standard until a direct user correction caught the asymmetry (documents/logs/27 follow-up): REAL's own idle gaps are now judged by the identical rule TRAINED's IDLE_TIMEOUT mechanism already was.&#xa;&#8226; Closed by an ASSUMED empty return (&quot;no trip&quot;): the driver is still not observed back at home base by the time the whole replay window runs out -- that remaining gap to home IS the empty-return-miles metric, priced at real routed distance. This is now the RARE case for both arms (the idle-timeout check above handles most mid-window gaps); it only fires for whatever's left at the very end.&#xa;&#8226; HOS remaining at return: legal driving/duty hours still available but UNUSED once back home -- real forgone capacity. Reconstructed for REAL from the SAME seeded starting HOS condition TRAINED's own simulated fleet uses (identical random seed), walked forward through REAL's own actual pickup/delivery timestamps -- a real reconstruction, not an assumption about REAL.&#xa;&#8226; These 42 real drivers home to a genuinely DIVERSE mix -- 31 Milton, 7 Barrie, 4 London (fixed earlier this session: an old version of this analysis incorrectly showed all 42 as London-only, before calibration.driver_home_hub existed -- see sim/calibrate_driver_home_hub.py).&#xa;&#8226; Empty-return-miles is a RUNNING TOTAL across the WHOLE cycle (fixed same day, documents/logs/27 follow-up: an earlier version only counted the cycle-CLOSING leg, silently missing the far more common ordinary deadhead between consecutive trips within a cycle, for both arms)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;verticalAlign=top;spacingLeft=15;spacingTop=12;spacingRight=15;" vertex="1" parent="1">
+          <mxGeometry x="60" y="167" width="1380" height="260" as="geometry" />
         </mxCell>
 
         <!-- ===== Panel A: Cycle summary & coverage ===== -->
         <mxCell id="panelA_hdr" value="Cycle Summary &amp; Coverage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="390" width="1380" height="35" as="geometry" />
+          <mxGeometry x="60" y="450" width="1380" height="35" as="geometry" />
         </mxCell>
         <mxCell id="tA_h_metric" value="Metric" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="430" width="500" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tA_h_real" value="REAL" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="430" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tA_h_trained" value="TRAINED" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="430" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tA_h_diff" value="Diff" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="430" width="280" height="30" as="geometry" />
-        </mxCell>
-
-        <mxCell id="tA_r1_m" value="Total cycles (all 42 drivers)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="60" y="460" width="500" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tA_r1_real" value="116" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="460" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tA_r1_trained" value="101" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="460" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tA_r1_diff" value="-15" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=10;align=center;fontColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="460" width="280" height="30" as="geometry" />
-        </mxCell>
-
-        <mxCell id="tA_r2_m" value="  closed by a real paid trip landing at home" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
           <mxGeometry x="60" y="490" width="500" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tA_r2_real" value="76" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+        <mxCell id="tA_h_real" value="REAL" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
           <mxGeometry x="560" y="490" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tA_r2_trained" value="76" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+        <mxCell id="tA_h_trained" value="TRAINED" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
           <mxGeometry x="840" y="490" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tA_r2_diff" value="0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=10;align=center;fontColor=#666666;" vertex="1" parent="1">
+        <mxCell id="tA_h_diff" value="Diff" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
           <mxGeometry x="1120" y="490" width="280" height="30" as="geometry" />
         </mxCell>
 
-        <mxCell id="tA_r3_m" value="  closed by a real SIMULATED deadhead leg" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+        <mxCell id="tA_r1_m" value="Total cycles (all 42 drivers)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
           <mxGeometry x="60" y="520" width="500" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tA_r3_real" value="n/a" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;fontColor=#999999;" vertex="1" parent="1">
+        <mxCell id="tA_r1_real" value="770" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
           <mxGeometry x="560" y="520" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tA_r3_trained" value="4" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+        <mxCell id="tA_r1_trained" value="1,094" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
           <mxGeometry x="840" y="520" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tA_r3_diff" value="--" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=10;align=center;fontColor=#666666;" vertex="1" parent="1">
+        <mxCell id="tA_r1_diff" value="+324" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=10;align=center;fontColor=#666666;" vertex="1" parent="1">
           <mxGeometry x="1120" y="520" width="280" height="30" as="geometry" />
         </mxCell>
 
-        <mxCell id="tA_r4_m" value="  closed by an ASSUMED empty return (no trip found)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=left;spacingLeft=8;" vertex="1" parent="1">
+        <mxCell id="tA_r2_m" value="  closed by a real paid trip landing at home" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
           <mxGeometry x="60" y="550" width="500" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tA_r4_real" value="40 (34%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
+        <mxCell id="tA_r2_real" value="648" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
           <mxGeometry x="560" y="550" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tA_r4_trained" value="21 (21%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
+        <mxCell id="tA_r2_trained" value="664" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
           <mxGeometry x="840" y="550" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tA_r4_diff" value="-13 pts" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
+        <mxCell id="tA_r2_diff" value="+16" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=10;align=center;fontColor=#666666;" vertex="1" parent="1">
           <mxGeometry x="1120" y="550" width="280" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="tA_r3_m" value="closed by a real idle-timeout-driven leg" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="580" width="500" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tA_r3_real" value="116" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="560" y="580" width="280" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tA_r3_trained" value="422" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="840" y="580" width="280" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tA_r3_diff" value="--" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=10;align=center;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="580" width="280" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="tA_r4_m" value="  closed by an ASSUMED empty return (no trip found)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="610" width="500" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tA_r4_real" value="6 (1%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="560" y="610" width="280" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tA_r4_trained" value="8 (1%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="840" y="610" width="280" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tA_r4_diff" value="~0 pts" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=center;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="610" width="280" height="30" as="geometry" />
         </mxCell>
 
         <!-- ===== Panel B: Per-cycle averages ===== -->
         <mxCell id="panelB_hdr" value="Per-Cycle Averages (ALL cycles, nothing excluded)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="605" width="1380" height="35" as="geometry" />
+          <mxGeometry x="60" y="665" width="1380" height="35" as="geometry" />
         </mxCell>
         <mxCell id="tB_h_metric" value="Metric" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="645" width="500" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tB_h_real" value="REAL" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="645" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tB_h_trained" value="TRAINED" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="645" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tB_h_diff" value="Diff" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="645" width="280" height="30" as="geometry" />
-        </mxCell>
-
-        <mxCell id="tB_r1_m" value="Avg trips per cycle" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="60" y="675" width="500" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tB_r1_real" value="14.4" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="675" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tB_r1_trained" value="16.5" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="675" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tB_r1_diff" value="+2.1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="675" width="280" height="30" as="geometry" />
-        </mxCell>
-
-        <mxCell id="tB_r2_m" value="Avg revenue per cycle (CAD)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=left;spacingLeft=8;" vertex="1" parent="1">
           <mxGeometry x="60" y="705" width="500" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r2_real" value="1,980" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
+        <mxCell id="tB_h_real" value="REAL" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
           <mxGeometry x="560" y="705" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r2_trained" value="2,274" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
+        <mxCell id="tB_h_trained" value="TRAINED" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
           <mxGeometry x="840" y="705" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r2_diff" value="+294 (+15%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=12;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
+        <mxCell id="tB_h_diff" value="Diff" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
           <mxGeometry x="1120" y="705" width="280" height="30" as="geometry" />
         </mxCell>
 
-        <mxCell id="tB_r3_m" value="Avg empty return miles per cycle" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+        <mxCell id="tB_r1_m" value="Avg trips per cycle" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
           <mxGeometry x="60" y="735" width="500" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r3_real" value="35.9" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+        <mxCell id="tB_r1_real" value="2.2" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
           <mxGeometry x="560" y="735" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r3_trained" value="20.1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+        <mxCell id="tB_r1_trained" value="1.6" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
           <mxGeometry x="840" y="735" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r3_diff" value="-15.8 (-44%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=12;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
+        <mxCell id="tB_r1_diff" value="-0.6 (-27%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=11;fontStyle=1;align=center;fontColor=#B85450;" vertex="1" parent="1">
           <mxGeometry x="1120" y="735" width="280" height="30" as="geometry" />
         </mxCell>
 
-        <mxCell id="tB_r4_m" value="Avg HOS remaining at return (hrs)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+        <mxCell id="tB_r2_m" value="Avg revenue per cycle (CAD)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=left;spacingLeft=8;" vertex="1" parent="1">
           <mxGeometry x="60" y="765" width="500" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r4_real" value="10.0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+        <mxCell id="tB_r2_real" value="298" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
           <mxGeometry x="560" y="765" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r4_trained" value="9.3" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+        <mxCell id="tB_r2_trained" value="222" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
           <mxGeometry x="840" y="765" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r4_diff" value="-0.7" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=10;align=center;fontColor=#666666;" vertex="1" parent="1">
+        <mxCell id="tB_r2_diff" value="-76 (-26%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=12;fontStyle=1;align=center;fontColor=#B85450;" vertex="1" parent="1">
           <mxGeometry x="1120" y="765" width="280" height="30" as="geometry" />
         </mxCell>
 
-        <mxCell id="tB_r5_m" value="Avg cycle duration (calendar hrs)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+        <mxCell id="tB_r3_m" value="Avg empty return miles per cycle" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
           <mxGeometry x="60" y="795" width="500" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r5_real" value="431.2" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+        <mxCell id="tB_r3_real" value="49.8" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
           <mxGeometry x="560" y="795" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r5_trained" value="402.1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+        <mxCell id="tB_r3_trained" value="44.2" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
           <mxGeometry x="840" y="795" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tB_r5_diff" value="-30.2 (-7%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
+        <mxCell id="tB_r3_diff" value="-5.6 (-11%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=12;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
           <mxGeometry x="1120" y="795" width="280" height="30" as="geometry" />
         </mxCell>
 
-        <mxCell id="panelB_note" value="&quot;HOS remaining at return&quot; is a single SNAPSHOT -- just the final leg of a whole multi-week cycle -- so it's close either way (REAL slightly higher, not a real story). It does NOT answer &quot;is the model maximizing legal hours without going over&quot; -- that needs every real work-day counted, not just the last one. See the Utilization panel below for that direct answer. Cycle duration: TRAINED does more trips and more revenue in 7% FEWER calendar hours per cycle -- genuinely tighter, less wasteful trip selection, not a rolling-window artifact (tested and confirmed directly)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F9FF;strokeColor=#6C8EBF;fontSize=10;align=left;verticalAlign=middle;spacingLeft=12;spacingRight=12;" vertex="1" parent="1">
-          <mxGeometry x="60" y="835" width="1380" height="85" as="geometry" />
+        <mxCell id="tB_r4_m" value="Avg HOS remaining at return (hrs)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="825" width="500" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tB_r4_real" value="7.4" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="560" y="825" width="280" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tB_r4_trained" value="8.5" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="840" y="825" width="280" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tB_r4_diff" value="+1.1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=10;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="825" width="280" height="30" as="geometry" />
         </mxCell>
 
-        
-        <!-- ===== Panel E: HOS Utilization (daily, "maximized but not going over") ===== -->
-        <mxCell id="panelE_hdr" value="HOS Daily Utilization — Avg Driving Hours / Legal Day" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1095" width="1380" height="35" as="geometry" />
+        <mxCell id="tB_r5_m" value="Avg cycle duration (calendar hrs)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="855" width="500" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="panelE_sub" value="Fraction of the legal 13-hour daily driving limit actually spent behind the wheel (across ALL real work-days, not just return moments)" style="text;html=1;whiteSpace=wrap;fontSize=11;fontStyle=2;align=center;verticalAlign=middle;fontColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1133" width="1380" height="24" as="geometry" />
+        <mxCell id="tB_r5_real" value="66.3" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="560" y="855" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tE_h_metric" value="Metric" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1157" width="500" height="30" as="geometry" />
+        <mxCell id="tB_r5_trained" value="42.0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="840" y="855" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tE_h_real" value="REAL" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="1157" width="280" height="30" as="geometry" />
+        <mxCell id="tB_r5_diff" value="-24.3 (-37%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=center;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="855" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tE_h_trained" value="TRAINED" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="1157" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_h_diff" value="Diff" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="1157" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r1_m" value="Avg driving hours / work-day (of 13h legal)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1187" width="500" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r1_real" value="3.79 / 13.0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="1187" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r1_trained" value="6.34 / 13.0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="1187" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r1_diff" value="+2.55 hrs" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="1187" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r2_m" value="Avg daily utilization %" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;fontStyle=1;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1217" width="500" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r2_real" value="29.1%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="1217" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r2_trained" value="48.8%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="1217" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r2_diff" value="+19.7 pts" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=12;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="1217" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r3_m" value="Work-days observed (over-13h days)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1247" width="500" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r3_real" value="823 (5 over limit)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="1247" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r3_trained" value="720 (14 over limit)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="1247" width="280" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="tE_r3_diff" value="-103 days (both tiny)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=10;align=center;fontColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="1247" width="280" height="30" as="geometry" />
+
+        <mxCell id="panelB_note" value="THREE TIMES corrected (documents/logs/27 follow-ups, all from direct, sustained user pushback -- real bugs, not reassurances): (1) REAL wasn't judged by the same idle-timeout standard as TRAINED; (2) empty miles only counted the cycle-CLOSING leg, not the whole cycle, for both arms; (3) TRAINED's own cycle reconstruction silently DROPPED all 130 recovered orders, even though the driver's real decisions were made with them available and every other panel here credits TRAINED for them -- fixed, plus a real RNG non-determinism bug (Python's hash() on a tuple was randomized per-process, causing REAL's own cycle count to drift between reruns: 763/764/770/770 -- fixed with a stable integer seed, now byte-identical across reruns, confirmed directly). With all fixes in: TRAINED's total cycle revenue now reconciles exactly to its own known aggregate ($242,868 vs the $243,277 reported elsewhere). Revenue/trips per cycle are STILL lower for TRAINED -- genuinely, not a bug -- because TRAINED earns MORE total revenue across EVEN MORE cycles (1,094 vs REAL's 770): more, shorter loops home, the direct signature of prioritizing driver-home-time, independently confirmed by the paired-comparison test's real revenue cost (p=0.0188). Empty miles, HOS margin, and cycle duration all favor TRAINED. This model (v4) IS the deployed live model (documents/logs/27) -- deployed on that explicit, disclosed tradeoff." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=10;align=left;verticalAlign=middle;spacingLeft=12;spacingRight=12;" vertex="1" parent="1">
+          <mxGeometry x="60" y="895" width="1380" height="85" as="geometry" />
         </mxCell>
 
         <!-- ===== Panel C: Missed-opportunity recovery ===== -->
         <mxCell id="panelC_hdr" value="Missed-Opportunity Recovery" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1150" width="1380" height="35" as="geometry" />
+          <mxGeometry x="60" y="1005" width="1380" height="35" as="geometry" />
         </mxCell>
         <mxCell id="panelC_sub" value="130 real historical was_dispatched=false orders, replayed into the SAME fleet timeline as the dispatched orders" style="text;html=1;whiteSpace=wrap;fontSize=11;fontStyle=2;align=center;verticalAlign=middle;fontColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1188" width="1380" height="24" as="geometry" />
+          <mxGeometry x="60" y="1043" width="1380" height="24" as="geometry" />
         </mxCell>
 
         <mxCell id="donut_outer" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;strokeWidth=3;" vertex="1" parent="1">
-          <mxGeometry x="140" y="1230" width="170" height="170" as="geometry" />
+          <mxGeometry x="140" y="1085" width="170" height="170" as="geometry" />
         </mxCell>
         <mxCell id="donut_label" value="130 / 130&#10;(100%)&#10;feasible candidate found" style="text;html=1;whiteSpace=wrap;fontSize=13;fontStyle=1;align=center;verticalAlign=middle;fontColor=#2D6A2D;" vertex="1" parent="1">
-          <mxGeometry x="140" y="1230" width="170" height="170" as="geometry" />
+          <mxGeometry x="140" y="1085" width="170" height="170" as="geometry" />
         </mxCell>
 
         <mxCell id="breakdown_hdr" value="Breakdown of the 130 recovered orders:" style="text;html=1;whiteSpace=wrap;fontSize=12;fontStyle=1;align=left;verticalAlign=middle;fontColor=#1A1A1A;" vertex="1" parent="1">
-          <mxGeometry x="360" y="1230" width="500" height="25" as="geometry" />
+          <mxGeometry x="360" y="1085" width="500" height="25" as="geometry" />
         </mxCell>
         <mxCell id="bd1" value="48 real YARD SHUTTLE moves (origin = dest = real hub location -- correctly net ~$0 linehaul revenue)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="360" y="1263" width="500" height="60" as="geometry" />
+          <mxGeometry x="360" y="1118" width="500" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="bd2" value="82 real FREIGHT opportunities recovered&#10;$10,796.97 CAD total ($131.67 CAD / order avg)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="360" y="1333" width="500" height="55" as="geometry" />
+        <mxCell id="bd2" value="82 real FREIGHT opportunities recovered&#10;$11,566.79 CAD total ($141.06 CAD / order avg)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="360" y="1188" width="500" height="55" as="geometry" />
         </mxCell>
 
-        <mxCell id="total_recovered" value="Total $ recovered across all 130 orders: 10,596.19 CAD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=12;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="900" y="1263" width="480" height="125" as="geometry" />
+        <mxCell id="total_recovered" value="Total $ recovered across all 130 orders: 11,210.06 CAD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=12;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="900" y="1118" width="480" height="125" as="geometry" />
         </mxCell>
 
         <!-- ===== Panel D: Work distribution ===== -->
         <mxCell id="panelD_hdr" value="Work Distribution Across the Same 42 Real Drivers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1425" width="1380" height="35" as="geometry" />
+          <mxGeometry x="60" y="1280" width="1380" height="35" as="geometry" />
         </mxCell>
         <mxCell id="panelD_sub" value="Does the model spread work out, or concentrate it? Same 42-driver pool as above, both arms, across the full data window (not per-cycle)." style="text;html=1;whiteSpace=wrap;fontSize=11;fontStyle=2;align=center;verticalAlign=middle;fontColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1462" width="1380" height="22" as="geometry" />
+          <mxGeometry x="60" y="1317" width="1380" height="22" as="geometry" />
         </mxCell>
 
         <mxCell id="tD_h_metric" value="Metric" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1489" width="500" height="30" as="geometry" />
+          <mxGeometry x="60" y="1344" width="500" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_h_real" value="REAL" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="1489" width="280" height="30" as="geometry" />
+          <mxGeometry x="560" y="1344" width="280" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_h_trained" value="TRAINED" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="1489" width="280" height="30" as="geometry" />
+          <mxGeometry x="840" y="1344" width="280" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_h_diff" value="Diff" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="1489" width="280" height="30" as="geometry" />
+          <mxGeometry x="1120" y="1344" width="280" height="30" as="geometry" />
         </mxCell>
 
         <mxCell id="tD_r1_m" value="Drivers actively used (of 42)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1519" width="500" height="30" as="geometry" />
+          <mxGeometry x="60" y="1374" width="500" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_r1_real" value="42" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="1519" width="280" height="30" as="geometry" />
+          <mxGeometry x="560" y="1374" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tD_r1_trained" value="36" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="1519" width="280" height="30" as="geometry" />
+        <mxCell id="tD_r1_trained" value="38" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="840" y="1374" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tD_r1_diff" value="-6" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=10;align=center;fontColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="1519" width="280" height="30" as="geometry" />
+        <mxCell id="tD_r1_diff" value="-4" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#CCCCCC;fontSize=10;align=center;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="1374" width="280" height="30" as="geometry" />
         </mxCell>
 
         <mxCell id="tD_r2_m" value="Avg trips per driver" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1549" width="500" height="30" as="geometry" />
+          <mxGeometry x="60" y="1404" width="500" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_r2_real" value="39.7" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="1549" width="280" height="30" as="geometry" />
+          <mxGeometry x="560" y="1404" width="280" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_r2_trained" value="42.8" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="1549" width="280" height="30" as="geometry" />
+          <mxGeometry x="840" y="1404" width="280" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_r2_diff" value="+3.1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="1549" width="280" height="30" as="geometry" />
+          <mxGeometry x="1120" y="1404" width="280" height="30" as="geometry" />
         </mxCell>
 
         <mxCell id="tD_r3_m" value="Spread across drivers (std dev of trip count, lower = more even)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1579" width="500" height="30" as="geometry" />
+          <mxGeometry x="60" y="1434" width="500" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_r3_real" value="39.5 (range 1-166)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="1579" width="280" height="30" as="geometry" />
+          <mxGeometry x="560" y="1434" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tD_r3_trained" value="28.5 (range 0-86)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="1579" width="280" height="30" as="geometry" />
+        <mxCell id="tD_r3_trained" value="23.9 (range 0-74)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="840" y="1434" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tD_r3_diff" value="-11.0 (more even)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="1579" width="280" height="30" as="geometry" />
+        <mxCell id="tD_r3_diff" value="-15.6 (more even)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="1434" width="280" height="30" as="geometry" />
         </mxCell>
 
         <mxCell id="tD_r4_m" value="Avg revenue per driver (CAD)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1609" width="500" height="30" as="geometry" />
+          <mxGeometry x="60" y="1464" width="500" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_r4_real" value="5,469" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="1609" width="280" height="30" as="geometry" />
+          <mxGeometry x="560" y="1464" width="280" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_r4_trained" value="5,792" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F9F9F9;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="1609" width="280" height="30" as="geometry" />
+          <mxGeometry x="840" y="1464" width="280" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_r4_diff" value="+324" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="1609" width="280" height="30" as="geometry" />
+          <mxGeometry x="1120" y="1464" width="280" height="30" as="geometry" />
         </mxCell>
 
         <mxCell id="tD_r5_m" value="Avg work hours per driver (deadhead+loaded)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1639" width="500" height="30" as="geometry" />
+          <mxGeometry x="60" y="1494" width="500" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tD_r5_real" value="48.3" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="560" y="1639" width="280" height="30" as="geometry" />
+          <mxGeometry x="560" y="1494" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tD_r5_trained" value="51.1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="1639" width="280" height="30" as="geometry" />
+        <mxCell id="tD_r5_trained" value="49.5" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CCCCCC;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="840" y="1494" width="280" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tD_r5_diff" value="+2.8" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="1639" width="280" height="30" as="geometry" />
+        <mxCell id="tD_r5_diff" value="+1.2" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;fontStyle=1;align=center;fontColor=#2D6A2D;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="1494" width="280" height="30" as="geometry" />
         </mxCell>
 
-        <mxCell id="panelD_note" value="TRAINED spreads trips MORE evenly across these same 42 drivers than real dispatch did (lower spread, no single driver above 86 trips vs. REAL's single busiest driver at 166) -- an emergent property of the model's own optimization, not a fairness rule anyone added. Still doesn't use all 42 (6 idle) -- this backtest runs with zero exploration (always picks the single best driver, never rotates); more training runs and/or a small amount of exploration in evaluation should spread usage further." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=10;align=left;verticalAlign=middle;spacingLeft=12;spacingRight=12;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1679" width="1380" height="65" as="geometry" />
+        <mxCell id="panelD_note" value="TRAINED (v4) spreads trips MORE evenly across these same 42 drivers than real dispatch did (lower spread, no single driver above 74 trips vs. REAL's single busiest driver at 166) -- an emergent property of the model's own optimization, not a fairness rule anyone added. Still doesn't use all 42 (4 idle) -- this backtest runs with zero exploration (always picks the single best driver, never rotates); more training runs and/or a small amount of exploration in evaluation should spread usage further." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=10;align=left;verticalAlign=middle;spacingLeft=12;spacingRight=12;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1534" width="1380" height="65" as="geometry" />
         </mxCell>
 
         <!-- ===== Bottom: honest interpretation banner ===== -->
         <mxCell id="interp_hdr" value="Honest Interpretation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;fontStyle=1;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1765" width="1380" height="35" as="geometry" />
+          <mxGeometry x="60" y="1620" width="1380" height="35" as="geometry" />
         </mxCell>
-        <mxCell id="interp_body" value="100% missed-opportunity recovery is NOT proof of an exceptional model -- real order volume in this window was genuinely light (~13.7 orders/driver across ~5.5 real months), so real fleet-wide capacity likely existed the whole time; not a claim the real dispatcher made 130 provable mistakes (real-world constraints like contract terms and driver preference aren't visible in this data). The cycle-based results above are the more rigorous test: every one of REAL's own 116 real driver-cycles is counted, none excluded, and every metric -- trips, revenue, empty-return miles, unused HOS margin, and elapsed time -- points the same direction. Earlier drafts of this analysis used a different (flawed) method that excluded REAL's worst-performing cycles from its own average and showed REAL winning on cost-per-cycle; that was traced to the exclusion, not a real result, and corrected here." style="text;html=1;whiteSpace=wrap;fontSize=11;align=left;verticalAlign=middle;fontColor=#5C4A00;spacingLeft=15;spacingRight=15;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1805" width="1380" height="95" as="geometry" />
+        <mxCell id="interp_body" value="100% missed-opportunity recovery is NOT proof of an exceptional model -- real order volume in this window was genuinely light (~13.7 orders/driver across ~5.5 real months), so real fleet-wide capacity likely existed the whole time; not a claim the real dispatcher made 130 provable mistakes (real-world constraints like contract terms and driver preference aren't visible in this data). The cycle-based results above are the more rigorous test: every one of REAL's own 770 real driver-cycles is counted, none excluded -- a figure and its supporting metrics that only became fair and complete after THREE direct user corrections (documents/logs/27 follow-ups, real bugs each time, not reassurances): REAL judged by the same idle-timeout standard as TRAINED, empty miles priced for the WHOLE cycle not just the closing leg, and TRAINED's own cycle reconstruction no longer silently drops the 130 recovered orders it's credited for everywhere else in this dashboard (plus a real RNG-determinism bug fixed along the way -- these numbers are now byte-identical across reruns, verified directly). With all fixes in, TRAINED now wins or ties on every operational metric here (distance-to-home, deadhead miles per cycle, missed-opportunity recovery, work distribution, HOS margin preserved) except cycle-level trip/revenue density -- down purely because TRAINED earns MORE total revenue spread across EVEN MORE, shorter cycles, a direct, disclosed consequence of prioritizing driver-home-time, confirmed independently by the paired-comparison test's real revenue cost (p=0.0188, see documents/logs/27). This model (v4) IS now the deployed live model -- this dashboard is not a pre-deployment gate, it's the honest record of the tradeoff that was accepted." style="text;html=1;whiteSpace=wrap;fontSize=11;align=left;verticalAlign=middle;fontColor=#5C4A00;spacingLeft=15;spacingRight=15;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1660" width="1380" height="95" as="geometry" />
         </mxCell>
 
-        <mxCell id="footer" value="Source: sim/backtest/real_data_replay.py --cycles (cycle-based panels) and --restrict-drivers (missed-opportunity/work-distribution panels), run against the current trained model." style="text;html=1;whiteSpace=wrap;fontSize=10;fontStyle=2;align=center;verticalAlign=middle;fontColor=#999999;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1915" width="1380" height="20" as="geometry" />
+        <mxCell id="footer" value="Source: sim/backtest/real_data_replay.py --cycles (cycle-based panels) and --restrict-drivers (missed-opportunity/work-distribution panels), run against state_value_function_v4_hours_since_home.pkl (documents/logs/27). A prior &quot;HOS Daily Utilization&quot; panel is not reproduced here -- the analysis that computed it is no longer part of real_data_replay.py; removed rather than shown with stale numbers." style="text;html=1;whiteSpace=wrap;fontSize=10;fontStyle=2;align=center;verticalAlign=middle;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1770" width="1380" height="40" as="geometry" />
         </mxCell>
 
       </root>

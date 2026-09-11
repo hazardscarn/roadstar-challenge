@@ -59,8 +59,8 @@ from datetime import datetime, timedelta
 
 from sim.config import (
     ASSUMED_BREAKDOWN_COST_CAD, ASSUMED_CYCLE_STRANDING_PENALTY_CAD_MAX, ASSUMED_LATE_PENALTY_PER_HOUR_CAD,
-    ASSUMED_LTL_RATE_MULTIPLIER, ASSUMED_OPERATING_COST_PER_MILE, HOS_URGENCY_SAFETY_BUFFER_HOURS,
-    LATE_GRACE_MINUTES, LATE_PENALTY_EXPONENT, linehaul_rate_per_mile,
+    ASSUMED_LTL_RATE_MULTIPLIER, ASSUMED_OPERATING_COST_PER_MILE, ASSUMED_TARGET_HOURS_BETWEEN_HOME,
+    HOS_URGENCY_SAFETY_BUFFER_HOURS, LATE_GRACE_MINUTES, LATE_PENALTY_EXPONENT, linehaul_rate_per_mile,
 )
 from sim.engine.hos import HOSState
 from sim.engine.maintenance import TruckMaintenanceState
@@ -107,20 +107,57 @@ def _lateness_penalty_from_hours_late(hours_late: float) -> float:
     return ASSUMED_LATE_PENALTY_PER_HOUR_CAD * (max(0.0, hours_late) ** LATE_PENALTY_EXPONENT)
 
 
-def _hos_urgency(remaining_cycle_hours: float, hours_to_home: float) -> float:
-    """0-1: how urgently a driver needs to head home before their HOS CYCLE (7-day/14-day, NOT
-    the daily clocks -- see this module's header comment for why) genuinely runs out. 0 while
-    there's comfortable cycle margin relative to the real drive-time needed to reach home
-    (`hours_to_home`, from get_route() -- real OSRM duration, not a guessed average-speed
-    conversion), ramping toward 1 as that margin tightens -- same ramp shape as
-    HOSState.stranding_risk() for the same reason (a comfortable margin needs zero pull; a tight
-    one needs it sharply). Already home (hours_to_home <= 0) is always 0 urgency, not a
-    division edge case.
+def _urgency_ramp(remaining_hours: float, hours_to_home: float) -> float:
+    """Shared 0-1 ramp shape, factored out so the legal-cycle and business days-since-home
+    urgencies below stay bit-for-bit the same curve, just fed different clocks: 0 while there's
+    comfortable margin relative to the real drive-time needed to reach home (`hours_to_home`, from
+    get_route() -- real OSRM duration, not a guessed average-speed conversion), ramping toward 1
+    as that margin tightens -- same shape as HOSState.stranding_risk() for the same reason (a
+    comfortable margin needs zero pull; a tight one needs it sharply). Already home
+    (hours_to_home <= 0) is always 0 urgency, not a division edge case.
     """
     if hours_to_home <= 0:
         return 0.0
-    margin_ratio = remaining_cycle_hours / (hours_to_home + HOS_URGENCY_SAFETY_BUFFER_HOURS)
+    margin_ratio = remaining_hours / (hours_to_home + HOS_URGENCY_SAFETY_BUFFER_HOURS)
     return max(0.0, min(1.0, 1 - margin_ratio))
+
+
+def _hos_urgency(remaining_cycle_hours: float, hours_to_home: float) -> float:
+    """0-1: how urgently a driver needs to head home before their HOS CYCLE (7-day/14-day, NOT
+    the daily clocks -- see this module's header comment for why) genuinely runs out. See
+    _urgency_ramp() for the shared ramp shape/mechanics.
+    """
+    return _urgency_ramp(remaining_cycle_hours, hours_to_home)
+
+
+def _business_home_urgency(hours_since_home: float, hours_to_home: float) -> float:
+    """0-1: how urgently a driver needs to head home on a BUSINESS cadence (documents/logs/25 --
+    Powell/Schneider National's "days from home" driver attribute), independent of legal HOS
+    margin entirely -- see sim/config.py's ASSUMED_TARGET_HOURS_BETWEEN_HOME docstring for why
+    this exists: the legal-cycle version above was confirmed DORMANT almost always
+    (documents/logs/24: 0/8,990 trips ever triggered it -- a normal week never gets remotely close
+    to the real legal limit). Same ramp shape as the legal version, just measuring "time left
+    before the target cadence" instead of "time left before the legal cycle empties."
+    """
+    remaining_before_target = max(0.0, ASSUMED_TARGET_HOURS_BETWEEN_HOME - hours_since_home)
+    return _urgency_ramp(remaining_before_target, hours_to_home)
+
+
+def combined_home_urgency(remaining_cycle_hours: float, hours_since_home: float | None, hours_to_home: float) -> float:
+    """The real trigger for home_progress_bonus/cycle_end_stranding_penalty: EITHER a genuine
+    legal-cycle deadline OR a normal business cadence should make it time to prioritize heading
+    home -- max() of the two, not the legal one alone (documents/logs/25's Schneider National
+    precedent: its policy "gets drivers home on weekends, on a regular basis," not only when
+    legally forced to). `hours_since_home` is optional -- None means the caller hasn't wired the
+    new driver-state field yet, degrading to the exact legal-only behavior this replaces, not a
+    crash (same optional-field pattern this module already uses for expected_lateness_penalty and
+    the original home-progress args).
+    """
+    legal = _hos_urgency(remaining_cycle_hours, hours_to_home)
+    if hours_since_home is None:
+        return legal
+    business = _business_home_urgency(hours_since_home, hours_to_home)
+    return max(legal, business)
 
 
 def compute_reward(
@@ -143,6 +180,7 @@ def compute_reward(
     distance_to_home_miles_landing: float | None = None,
     hours_to_home_current: float | None = None,
     hours_to_home_landing: float | None = None,
+    hours_since_home: float | None = None,
     gamma: float = 0.9,
 ) -> RewardBreakdown:
     """One assignment decision's reward. `pre_pickup_deadhead_miles` is charged here (it's the
@@ -208,8 +246,17 @@ def compute_reward(
         # runs (dwell/deadhead specifics). Good enough for a shaping signal computed at decision
         # time from decision-time-only inputs.
         remaining_cycle_landing = max(0.0, remaining_cycle_now - planned_duty_hours)
-        urgency_now = _hos_urgency(remaining_cycle_now, hours_to_home_current)
-        urgency_landing = _hos_urgency(remaining_cycle_landing, hours_to_home_landing)
+        # Landing hours-since-home: same light estimate as remaining_cycle_landing above -- 0 if
+        # this trip's own landing spot IS home (distance_to_home_miles_landing ~0), otherwise
+        # current hours-since-home plus this trip's own planned duty hours (they've been away that
+        # much longer by the time they land), not the exact figure only known once the trip runs.
+        hours_since_home_landing = None
+        if hours_since_home is not None:
+            hours_since_home_landing = (
+                0.0 if distance_to_home_miles_landing <= 0 else hours_since_home + planned_duty_hours
+            )
+        urgency_now = combined_home_urgency(remaining_cycle_now, hours_since_home, hours_to_home_current)
+        urgency_landing = combined_home_urgency(remaining_cycle_landing, hours_since_home_landing, hours_to_home_landing)
         phi_now = -urgency_now * distance_to_home_miles
         phi_landing = -urgency_landing * distance_to_home_miles_landing
         cad_per_mile = ASSUMED_OPERATING_COST_PER_MILE  # avoided-deadhead framing -- same rate deadhead_cost itself uses

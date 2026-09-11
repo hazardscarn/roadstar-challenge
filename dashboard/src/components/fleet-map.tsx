@@ -1,7 +1,7 @@
 import 'leaflet/dist/leaflet.css'
 import * as L from 'leaflet'
 import * as React from 'react'
-import { Circle, CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet'
+import { Circle, CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, Tooltip, useMap } from 'react-leaflet'
 import type { FleetDriver } from '@/lib/api'
 import { truckIcon } from '@/lib/truck-icon'
 
@@ -87,6 +87,10 @@ export interface MapPin {
   lon: number
   color: string
   label?: string
+  /** A short tag (e.g. "P1", "D2") shown ALWAYS next to the pin, not just on click -- for a map
+   * with several same-colored stops (Order Story's cycle view) where a reader needs to tell which
+   * dot is which stop at a glance. Separate from `label` (still click-to-reveal, for longer text). */
+  permanentLabel?: string
 }
 
 export interface GeofenceCircle {
@@ -191,6 +195,11 @@ export function FleetMap({ drivers, selectedDriverId, onSelectDriver, satellite,
           pathOptions={{ color: '#fff', weight: 2, fillColor: pin.color, fillOpacity: 1 }}
         >
           {pin.label && <Popup>{pin.label}</Popup>}
+          {pin.permanentLabel && (
+            <Tooltip permanent direction="top" offset={[0, -6]} className="!rounded !border-0 !bg-ink-900/90 !px-1.5 !py-0.5 !text-[10px] !font-bold !text-white !shadow">
+              {pin.permanentLabel}
+            </Tooltip>
+          )}
         </CircleMarker>
       ))}
 
