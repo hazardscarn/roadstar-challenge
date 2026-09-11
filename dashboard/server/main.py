@@ -32,6 +32,7 @@ from sim.db import cursor  # noqa: E402
 from sim.engine.route_interpolation import get_route_geometry, interpolate_position  # noqa: E402
 from sim.engine.run_sim import get_route, load_sim_data, run_simulation  # noqa: E402
 from sim.engine.value_function import load_state_value_model, make_value_fn  # noqa: E402
+from sim.live import telemetry_simulator  # noqa: E402
 from sim.live.score_quote import QuoteRequest, score_quote  # noqa: E402
 from sim.live.trip_demo_simulator import SCENARIOS, run_trip_demo, start_trip_demo  # noqa: E402
 
@@ -70,6 +71,19 @@ def _load_models_once() -> None:
     booster, cols = load_state_value_model(str(REPO_ROOT / "sim/training/state_value_function_v2_home_progress.pkl"))
     _state["data"] = data
     _state["value_fn"] = make_value_fn(booster, cols, data)
+
+    # Fleet Telematics Simulator (sim/live/telemetry_simulator.py) -- the process that actually
+    # moves an ASSIGNED trip's truck, ticks geofence arrival/departure, and writes position
+    # history, so Live Ops shows real movement instead of parked markers. Gated behind an env var
+    # (off by default) rather than always-on: this codebase's own local-dev pattern is running
+    # that script as ITS OWN separate process alongside `uvicorn --reload` (see its module
+    # docstring); auto-starting it here too would double-tick every trip locally. Only the
+    # deployed backend (Railway) sets RUN_TELEMETRY_SIMULATOR=true -- one persistent process
+    # there covers both the API and the live fleet, no second service needed. This is exactly the
+    # kind of long-lived background work Vercel serverless functions can't do, which is the whole
+    # reason this backend lives on Railway and not Vercel in the first place.
+    if os.environ.get("RUN_TELEMETRY_SIMULATOR", "").lower() == "true":
+        threading.Thread(target=telemetry_simulator.run, daemon=True).start()
 
 
 @app.get("/api/health")
