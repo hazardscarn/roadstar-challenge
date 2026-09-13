@@ -1,7 +1,7 @@
 import 'leaflet/dist/leaflet.css'
 import * as L from 'leaflet'
 import * as React from 'react'
-import { Circle, CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, Tooltip, useMap } from 'react-leaflet'
+import { Circle, CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, TileLayer, Tooltip, useMap } from 'react-leaflet'
 import type { FleetDriver } from '@/lib/api'
 import { truckIcon } from '@/lib/truck-icon'
 
@@ -23,10 +23,21 @@ const STATUS_COLOR: Record<string, string> = {
   // the truck visibly changes color the moment the real buffered mechanism fires (not just when
   // it happens to be stationary).
   geofence_triggered: '#7c3aed',
+  // Synthetic-only, Simulation Showcase's AI-dispatch-day replay only -- real user ask: color
+  // trucks by HOME HUB (not duty status) so judges can see Milton trucks running near Milton,
+  // London trucks near London. Validated 3-series categorical palette (dataviz skill's reference
+  // palette, slots 1-3), the only 3 slots that clear the colorblind-safety floor under an
+  // all-pairs comparison (not just adjacent), same set already used for the dispatch backtest charts.
+  hub_milton: '#2a78d6',
+  hub_london: '#eb6834',
+  hub_barrie: '#1baf7a',
 }
 
 function statusColor(driver: FleetDriver) {
-  if (!driver.inspection_ok) return '#d9342b'
+  // Real pivot (Dispatch Board build): inspection tracking isn't modeled for dispatch-derived
+  // trips (no live.vehicle_inspections row gets created on finalize) -- checked directly, every
+  // driver was showing as a false "inspection issue" simply because nothing ever submits one
+  // anymore, not because of any real fleet condition. Removed rather than left showing noise.
   if (driver.hos_remaining_hours < 2) return '#d9342b'
   return STATUS_COLOR[driver.duty_status] ?? '#6b7382'
 }
@@ -98,10 +109,18 @@ export interface GeofenceCircle {
   lon: number
   radiusM: number
   label: string
-  /** Highlights the circle (filled, brighter) -- e.g. the Simulation Trip demo sets this the
+  /** Highlights the shape (filled, brighter) -- e.g. the Simulation Trip demo sets this the
    * instant the buffered geofence trigger confirms the truck is actually inside, so "entered the
    * geofence" is visible on the map itself, not just in a text alert. */
   active?: boolean
+  /** Real bug found directly: this map only ever drew the default radius circle, even for a stop
+   * with a manager-drawn custom shape saved (live.trip_geofence_overrides) -- the shape existed,
+   * was correctly used by the REAL arrival/departure trigger (simulation/live.process_position_
+   * tick(), which checks the override table first), but the live map kept showing the OLD default
+   * circle regardless, since this component never had a way to draw anything else. [lat, lon]
+   * ring, same convention geofence-map.tsx's toLatLngs() already uses -- when present, this draws
+   * INSTEAD of the radius circle, not in addition to it. */
+  polygon?: [number, number][]
 }
 
 export interface FleetMapProps {
@@ -203,21 +222,24 @@ export function FleetMap({ drivers, selectedDriverId, onSelectDriver, satellite,
         </CircleMarker>
       ))}
 
-      {geofences?.map((g, i) => (
-        <Circle
+      {geofences?.map((g, i) => {
+        const pathOptions = g.active
+          ? { color: '#7c3aed', weight: 2.5, fillColor: '#7c3aed', fillOpacity: 0.28 }
+          : { color: '#2a5cdb', weight: 1.5, fillOpacity: 0.08, dashArray: '4 4' }
+        // A manager-drawn custom shape draws INSTEAD of the default radius circle, not both --
+        // see GeofenceCircle.polygon's own comment for the real bug this closes.
+        return g.polygon && g.polygon.length >= 3 ? (
           // eslint-disable-next-line react/no-array-index-key
-          key={i}
-          center={[g.lat, g.lon]}
-          radius={g.radiusM}
-          pathOptions={
-            g.active
-              ? { color: '#7c3aed', weight: 2.5, fillColor: '#7c3aed', fillOpacity: 0.28 }
-              : { color: '#2a5cdb', weight: 1.5, fillOpacity: 0.08, dashArray: '4 4' }
-          }
-        >
-          <Popup>{g.label}</Popup>
-        </Circle>
-      ))}
+          <Polygon key={i} positions={g.polygon} pathOptions={pathOptions}>
+            <Popup>{g.label}</Popup>
+          </Polygon>
+        ) : (
+          // eslint-disable-next-line react/no-array-index-key
+          <Circle key={i} center={[g.lat, g.lon]} radius={g.radiusM} pathOptions={pathOptions}>
+            <Popup>{g.label}</Popup>
+          </Circle>
+        )
+      })}
 
       {routes?.map((route, i) =>
         route.coords.length > 1 ? (

@@ -8,12 +8,11 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
 
-// Real user feedback: "the trip log has to be a table that updates [on an interval] and has all
-// this info" -- backed directly by live.trip_log (RLS-protected as of sim/sql/036), the real
-// audit trail sim/live/telemetry_simulator.py writes to on every trip completion. Polling, not a
-// one-time fetch, matches the "keeps itself current" ask without needing a Realtime subscription
-// for a table that only grows a few rows an hour.
-const REFRESH_MS = 5 * 60 * 1000 // 5 minutes, per the user's explicit cadence
+// Real user pivot: the simulation is now the app's only data source (live.* dropped) -- backed
+// directly by simulation.trip_log (sim/sql/038), populated once a day's AI-dispatch replay
+// (sim/live/ai_dispatch_replay.py) completes. Polling, not a one-time fetch, so a manager who ran
+// a fresh replay while this tab was already open sees it show up without a manual refresh.
+const REFRESH_MS = 5 * 60 * 1000 // 5 minutes
 
 interface TripLogRow {
   trip_id: string
@@ -85,7 +84,7 @@ export default function TripHistory() {
 
   const refresh = React.useCallback(async () => {
     const { data, error } = await supabase
-      .schema('live')
+      .schema('simulation')
       .from('trip_log')
       .select(
         'trip_id,driver_id,truck_number,completed_at,loaded_miles,pre_pickup_deadhead_miles,post_delivery_deadhead_miles,' +
@@ -122,7 +121,7 @@ export default function TripHistory() {
     <div className="flex h-screen flex-col">
       <PageHeader
         title="Trip History"
-        description={`Every completed trip, from live.trip_log. Click a row for its full status history.${lastRefresh ? ` Updated ${formatDistanceToNow(lastRefresh, { addSuffix: true })} (refreshes every 5 min).` : ''}`}
+        description={`Every completed trip from the latest AI-dispatch simulation. Click a row for its full status history.${lastRefresh ? ` Updated ${formatDistanceToNow(lastRefresh, { addSuffix: true })} (refreshes every 5 min).` : ''}`}
       />
       <div className="flex-1 overflow-auto p-6">
         {rows.length === 0 ? (

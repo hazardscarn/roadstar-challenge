@@ -4,11 +4,10 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
 
-// Real user feedback: a bare position/speed log doesn't capture "the feature space" that
-// actually drives dispatch decisions -- switched from live.position_history (position/speed only)
-// to live.driver_state_snapshots (sim/sql/038), a 15-minute feature-state log (HOS remaining,
-// truck breakdown risk, duty status) written by the telemetry simulator's own tick loop, plus the
-// real geofence arrival/departure events (sim/sql/008) interleaved as milestone rows.
+// Real user pivot: the simulation is now the app's only data source (live.* dropped) --
+// simulation.driver_state_snapshots (sim/sql/038), an event-driven feature-state log (HOS
+// remaining, duty status) written per trip by sim/live/ai_dispatch_replay.py's generate(), plus
+// the real geofence arrival/departure events it writes alongside, interleaved as milestone rows.
 interface Row {
   kind: 'snapshot' | 'arrival' | 'departure'
   at: string
@@ -31,12 +30,12 @@ export function TripStatusHistory({ tripId }: { tripId: string | null }) {
     ;(async () => {
       const [{ data: snapshots }, { data: events }] = await Promise.all([
         supabase
-          .schema('live')
+          .schema('simulation')
           .from('driver_state_snapshots')
           .select('snapshot_at,duty_status,hos_driving_hours_remaining,truck_breakdown_risk')
           .eq('trip_id', tripId)
           .order('snapshot_at', { ascending: true }),
-        supabase.schema('live').from('geofence_events').select('event_type,occurred_at,location_id').eq('trip_id', tripId).order('occurred_at', { ascending: true }),
+        supabase.schema('simulation').from('geofence_events').select('event_type,occurred_at,location_id').eq('trip_id', tripId).order('occurred_at', { ascending: true }),
       ])
 
       let locationLabels: Record<number, string> = {}

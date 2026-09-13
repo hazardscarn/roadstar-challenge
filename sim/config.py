@@ -252,8 +252,27 @@ MAINTENANCE_DOWNTIME_DAYS = 2.0             # SYNTHESIZED but a plausible real s
 # Reefer); Flatbed has no roster row at all (Known Issue) so its capacity is synthesized here too.
 CAPACITY_BY_LOAD_TYPE = {'Dry Van': 44500, 'Reefer': 43500, 'Flatbed': 44500}
 
-# Real, from data_analysis.ipynb section 1c: max pallets observed across the historical data.
-CAPACITY_PALLETS_BY_LOAD_TYPE = {'Dry Van': 26, 'Reefer': 26, 'Flatbed': 26}
+# Real user report traced to a genuine data mismatch: with this at 26, orders needing more (real
+# historical orders DO exist above 26 -- checked directly against ground_truth.historical_orders:
+# max is 28, and 5.3% of all 2,070 real orders exceed 26) had ZERO compatible truck in the whole
+# fleet and were permanently unassignable -- not an optimizer failure, a hard capacity ceiling set
+# below what real freight actually needs. 28 is the real, directly-verified historical max (not 26,
+# despite this constant's own prior comment claiming data_analysis.ipynb section 1c already found
+# that -- a real discrepancy between an existing analysis note and a fresh direct query; the fresh
+# query is authoritative here).
+CAPACITY_PALLETS_BY_LOAD_TYPE = {'Dry Van': 28, 'Reefer': 28, 'Flatbed': 28}
+
+# Real user decision, stated explicitly, superseding the real historical load_type mix (checked
+# directly: ground_truth.historical_orders is ~85.2% Dry Van / 10.4% Flatbed / 4.4% Reefer) for
+# BOTH the truck fleet (sim/calibrate_truck_profile.py) and the Dispatch Board's generated order
+# book (sim/live/generate_dispatch_day.py) -- "Im keeping 70% dry van 25 as reefer and 5% as
+# flatbed in truck sim and orders should be kinda on same lines." truck_type itself has always
+# been a SYNTHESIZED label (ground_truth.trucks has no real type/spec column at all -- see
+# calibrate_truck_profile.py's own module docstring), so there's no real-hardware inventory this
+# overrides -- unlike the hub-share decision, this isn't "the real signal was too skewed to be
+# useful," it's a plain business choice to run a more Reefer-heavy demo fleet than the real
+# historical fleet happened to be.
+LOAD_TYPE_SHARES = {'Dry Van': 0.70, 'Reefer': 0.25, 'Flatbed': 0.05}
 
 # Home-base-return retarget (documents/logs/23_home_base_return_gap_found.md,
 # NEW_SESSION_TRAINING_RETARGET_PROMPT.md, documents/feature_reference_and_inference_guide.md) --
@@ -336,6 +355,16 @@ HOS_CYCLE_1_MAX_HOURS = 70   # 7-day
 HOS_CYCLE_2_MAX_HOURS = 120  # 14-day
 
 # Detention: 2h free window is a contractual assumption per the Project Brief, not from the data.
+# Independently corroborated by real industry benchmarks (no Southern-Ontario-specific figure
+# exists in any published study -- checked; Ontario Trucking Association's own detention coverage
+# just cites the same US sources rather than a regional number, and there's no structural reason
+# dock operations here would differ): FreightWaves SONAR puts the average dwell at ~119 min/stop,
+# DOT at ~2.5h average wait per stop, and ATRI's own definition of "detention" is dwell time BEYOND
+# 2 hours -- i.e. 2h is the industry's own dividing line between normal and excessive, not just
+# this project's assumption. Reused as the assumed NORMAL loading/unloading duration for dispatch
+# planning too (sim/dispatch_solver.py's DWELL_HOURS_PER_ORDER, dashboard/server/main.py's own
+# duty-hour estimate) -- real user correction: those independently used 1.5h, inconsistent with
+# this already-sourced number for the same real-world quantity.
 DETENTION_FREE_HOURS = 2
 
 # Southern Ontario coverage region (Project Brief Section 2). A genuine rectangular bounding
@@ -351,14 +380,26 @@ DETENTION_FREE_HOURS = 2
 # A ~0.05-degree pad (~5km) is added on every edge: the box above uses each city's exact
 # geocoded center point as an edge, so a real address slightly south/west of e.g. London's own
 # center (a razor-thin edge) would otherwise be wrongly excluded from London itself.
+#
+# max_lat widened from Barrie's own center (44.3893) to Orillia's (44.6086) -- real user ask,
+# explicitly twice: "Barrie area and Orillia" needs to be real coverage, not just Barrie city
+# proper, for the Dispatch Board's Barrie-hub catchment (sim/geocode_business_locations.py) to
+# have anywhere real to put Orillia-area pickups/dropoffs at all. A deliberate, cited expansion of
+# the intended anchor set (not a loosened guess -- see the "out-of-region leak" history above),
+# same edge-is-a-real-city's-own-center convention as every other side of this box.
 _PAD = 0.05
 COVERAGE_BBOX = {
     'min_lat': 42.9837 - _PAD, 'min_lon': -81.2496 - _PAD,
-    'max_lat': 44.3893 + _PAD, 'max_lon': -78.3199 + _PAD,
+    'max_lat': 44.6086 + _PAD, 'max_lon': -78.3199 + _PAD,
 }
 TERMINAL_HUBS = {
     'London': (42.9837, -81.2496),
     'Milton': (43.5137, -79.8828),
+    # Real user-driven pivot to a 3-hub day-ahead dispatch model (sim/sql/048_dispatch_board.sql)
+    # -- Barrie is now a real reference.locations terminal_hub row, not just an assumed
+    # driver-home-hub anchor via a proxy customer location. Same real geocoded point already used
+    # for Barrie elsewhere in this project (RONA INC. (BARRIE), location_id 5719).
+    'Barrie': (44.3893208, -79.6901302),
 }
 
 # Self-hosted OSRM server (ops/osrm_setup.sh), running persistently as the `roadstar-osrm`

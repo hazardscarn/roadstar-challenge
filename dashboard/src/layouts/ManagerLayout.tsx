@@ -1,22 +1,24 @@
-import { Map, Send, Package, History, Wrench, Users, Receipt, PlayCircle, Radar, LogOut } from 'lucide-react'
+import { Map, Send, History, Wrench, Users, Receipt, Radar, Database, LogOut } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
 
-// 8 destinations -- matches the researched "role-aware nav, 6-8 destinations" pattern for a
-// dispatcher role (see plan's UI design grounding section). Live Ops (track/monitor) and
-// Dispatch (quote/assign) are deliberately separate screens per real user feedback -- quoting a
-// new job and watching the live fleet are different tasks, not one crowded screen.
+// Real user pivot: the always-on live.* telemetry feed (the old "Live Ops") is dropped --
+// simulation.* (the AI-dispatch full-day replay) is now the app's only data source, so there's no
+// separate "live" fleet to watch alongside it. Simulation Showcase takes over the Live Ops slot,
+// relabeled "Live Ops Simulation"; Trip History and Billing now read from the same simulation.*
+// tables that replay populates, and a new "Data" tab exposes those tables directly for the demo.
 const NAV = [
-  { to: '/manager', label: 'Live Ops', icon: Map, end: true },
+  { to: '/manager', label: 'Live Ops Simulation', icon: Map, end: true },
   { to: '/manager/dispatch', label: 'Dispatch', icon: Send },
-  { to: '/manager/orders', label: 'Orders', icon: Package },
   { to: '/manager/trips', label: 'Trip History', icon: History },
+  { to: '/manager/billing', label: 'Billing', icon: Receipt },
+  { to: '/manager/data', label: 'Data', icon: Database },
+  { to: '/manager/simulation-trip', label: 'Simulation Trip', icon: Radar },
+  // Real user ask: these two moved to the bottom -- secondary now that Live Ops Simulation,
+  // Dispatch, Trip History, Billing, and Data are the primary simulation-driven flow.
   { to: '/manager/fleet-health', label: 'Fleet Health', icon: Wrench },
   { to: '/manager/drivers', label: 'Drivers', icon: Users },
-  { to: '/manager/billing', label: 'Billing', icon: Receipt },
-  { to: '/manager/simulation', label: 'Simulation Showcase', icon: PlayCircle },
-  { to: '/manager/simulation-trip', label: 'Simulation Trip', icon: Radar },
 ]
 
 export default function ManagerLayout() {

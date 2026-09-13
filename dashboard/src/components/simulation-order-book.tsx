@@ -60,9 +60,13 @@ export function SimulationOrderBook({
   simStart: string
   trips: SimTrip[]
   playing: boolean
-  /** Fires whenever an order becomes selected (auto-advance or manual click) -- lets the parent
-   * focus/highlight that order's trip on the map. */
-  onSelectOrder?: (quoteId: string) => void
+  /** Fires whenever an order becomes selected (auto-advance or manual click). `manual` is false
+   * for the auto-narration advance (fires continuously through playback as new orders are
+   * revealed) and true only for a real click -- real bug found directly: the parent was using
+   * this to pan/zoom the map (`focusFitTo`), so the auto-advance alone caused the exact "auto
+   * zoom and drop" the map-bounds fix further up was supposed to have already killed. The parent
+   * now only moves the map on a genuine `manual` selection. */
+  onSelectOrder?: (quoteId: string, manual: boolean) => void
   /** Opens the full "Order Story" drill-in for the given order. */
   onViewStory?: (quoteId: string) => void
 }) {
@@ -72,9 +76,21 @@ export function SimulationOrderBook({
   const [manualSelect, setManualSelect] = React.useState(false)
   const [candidates, setCandidates] = React.useState<CandidateRow[]>([])
   const [loadingCandidates, setLoadingCandidates] = React.useState(false)
+  // Real bug found from a screenshot: "Run AI Dispatch" replays sim/live/ai_dispatch_replay.py,
+  // which never writes simulation.quote_requests/quote_candidate_snapshots -- those tables are
+  // only ever populated by the older per-quote showcase simulator. So this panel's own query
+  // legitimately comes back empty for every AI-dispatch run, and the book showed "0 of 0" forever
+  // instead of the real trips already sitting in the `trips` prop. Falls back to building the
+  // book directly from that real, already-loaded trip data instead of leaving it blank.
+  const [usingTripFallback, setUsingTripFallback] = React.useState(false)
   const listRef = React.useRef<HTMLDivElement>(null)
 
-  const tripByQuoteId = React.useMemo(() => new Map(trips.map((t) => [t.quote_id, t])), [trips])
+  // Real bug found while wiring the fallback below: every AI-dispatch trip is persisted with
+  // quote_id = "" (dashboard/server/main.py's _ai_dispatch_trip_row_to_sim_trip hardcodes it --
+  // that table has no quote concept at all). An empty string is not a real per-trip key, so it
+  // collapses every trip onto one map entry; trip_id (a real per-trip UUID in both flows) is used
+  // instead whenever quote_id is blank.
+  const tripByQuoteId = React.useMemo(() => new Map(trips.map((t) => [t.quote_id || t.trip_id, t])), [trips])
 
   React.useEffect(() => {
     ;(async () => {
@@ -84,7 +100,31 @@ export function SimulationOrderBook({
         .select('quote_id,origin_location_id,dest_location_id,requested_at,requested_pickup_at,weight_lbs,pallets,load_type,service_type,status')
         .eq('run_id', runId)
         .order('requested_at', { ascending: true })
-      const rows = (data as unknown as QuoteRow[]) ?? []
+      let rows = (data as unknown as QuoteRow[]) ?? []
+
+      if (rows.length === 0 && trips.length > 0) {
+        // Real AI-dispatch trip -- everything the book needs (origin/dest, weight, pallets,
+        // load_type) is already on the trip itself. There's no separate "requested_at" moment for
+        // a whole-day plan built in advance, so the order's own assignment time (the same instant
+        // its truck starts driving to it on the map) stands in as the reveal point.
+        rows = [...trips]
+          .sort((a, b) => a.assigned_at_s - b.assigned_at_s)
+          .map((t): QuoteRow => ({
+            quote_id: t.quote_id || t.trip_id,
+            origin_location_id: t.origin_location_id,
+            dest_location_id: t.dest_location_id,
+            requested_at: new Date(new Date(simStart).getTime() + t.assigned_at_s * 1000).toISOString(),
+            requested_pickup_at: new Date(new Date(simStart).getTime() + (t.arr_pickup_at_s ?? t.assigned_at_s) * 1000).toISOString(),
+            weight_lbs: t.weight_lbs,
+            pallets: t.pallets,
+            load_type: t.load_type,
+            service_type: 'FTL', // real -- the dispatch board / CP-SAT solver only ever assigns FTL orders
+            status: 'assigned',
+          }))
+        setUsingTripFallback(true)
+      } else {
+        setUsingTripFallback(false)
+      }
       setOrders(rows)
 
       const locIds = Array.from(new Set(rows.flatMap((r) => [r.origin_location_id, r.dest_location_id])))
@@ -93,14 +133,20 @@ export function SimulationOrderBook({
         if (locs) setLabels(Object.fromEntries(locs.map((l) => [l.location_id, l.label as string])))
       }
     })()
-  }, [runId])
+  }, [runId, trips, simStart])
 
   const cursorTime = React.useMemo(() => new Date(new Date(simStart).getTime() + cursorSeconds * 1000), [simStart, cursorSeconds])
   const visibleOrders = orders.filter((o) => new Date(o.requested_at) <= cursorTime)
 
-  const selectOrder = React.useCallback(async (quoteId: string) => {
+  const selectOrder = React.useCallback(async (quoteId: string, manual: boolean) => {
     setSelectedId(quoteId)
-    onSelectOrder?.(quoteId)
+    onSelectOrder?.(quoteId, manual)
+    // AI-dispatch trips have no quote_candidate_snapshots rows at all (see the fallback note
+    // above) -- skip the query entirely rather than firing a request that's known to come back empty.
+    if (usingTripFallback) {
+      setCandidates([])
+      return
+    }
     setLoadingCandidates(true)
     const { data } = await supabase
       .schema('simulation')
@@ -111,7 +157,7 @@ export function SimulationOrderBook({
       .limit(8)
     setCandidates((data as unknown as CandidateRow[]) ?? [])
     setLoadingCandidates(false)
-  }, [onSelectOrder])
+  }, [onSelectOrder, usingTripFallback])
 
   // "This order came in -> N candidates found -> best candidate selected" -- auto-advances to the
   // NEWEST order as playback reveals it, so the demo narrates itself while playing. A manual click
@@ -121,7 +167,7 @@ export function SimulationOrderBook({
     if (visibleOrders.length === 0) return
     const newest = visibleOrders[visibleOrders.length - 1]
     if (!manualSelect || selectedId == null) {
-      if (selectedId !== newest.quote_id) selectOrder(newest.quote_id)
+      if (selectedId !== newest.quote_id) selectOrder(newest.quote_id, false)
     }
   }, [visibleOrders.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -138,7 +184,10 @@ export function SimulationOrderBook({
     <div className="flex h-full flex-col">
       <div className="border-b border-ink-200 px-3 py-2">
         <h3 className="font-display text-sm font-semibold text-ink-900">Order book</h3>
-        <p className="text-[11px] text-ink-400">{visibleOrders.length} of {orders.length} orders so far — real rows from simulation.quote_requests</p>
+        <p className="text-[11px] text-ink-400">
+          {visibleOrders.length} of {orders.length} orders so far —{' '}
+          {usingTripFallback ? "real orders from this run's AI-assigned trip plan" : 'real rows from simulation.quote_requests'}
+        </p>
         <div className="mt-1.5 flex flex-wrap gap-2 text-[10px] text-ink-500">
           {(Object.keys(STATUS_STYLE) as OrderStatus[]).map((s) => (
             <span key={s} className="flex items-center gap-1"><span className={`size-1.5 rounded-full ${STATUS_STYLE[s].dot}`} />{STATUS_STYLE[s].label}</span>
@@ -152,7 +201,7 @@ export function SimulationOrderBook({
           return (
             <button
               key={o.quote_id}
-              onClick={() => { setManualSelect(true); selectOrder(o.quote_id) }}
+              onClick={() => { setManualSelect(true); selectOrder(o.quote_id, true) }}
               className={`block w-full border-b border-ink-100 px-3 py-2 text-left text-xs hover:bg-ink-50 ${selectedId === o.quote_id ? 'bg-brand-50' : ''}`}
             >
               <div className="flex items-center justify-between">
@@ -178,19 +227,24 @@ export function SimulationOrderBook({
         <div className="max-h-72 overflow-auto border-t border-ink-200 bg-ink-50 p-3">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">
-              Candidates scored — simulation.quote_candidate_snapshots
+              {usingTripFallback ? 'Assignment — Google OR-Tools CP-SAT' : 'Candidates scored — simulation.quote_candidate_snapshots'}
             </p>
-            {onViewStory && (
+            {/* "View full story" reads simulation.quote_requests by this exact id -- a real
+                per-quote row that only the older showcase simulator ever writes, so it would 404
+                for an AI-dispatch order regardless of what key is used here. Hidden in fallback
+                mode rather than pointing at a drill-in that can't resolve. */}
+            {onViewStory && !usingTripFallback && (
               <button onClick={() => onViewStory(selectedId)} className="text-[11px] font-semibold text-brand-600 hover:underline">
                 View full story →
               </button>
             )}
           </div>
           <p className="mb-2 text-[11px] text-ink-400">
-            Ranked by the model's total value score (immediate value + expected future positioning value) —
-            the top-ranked candidate here is always the one assigned.
+            {usingTripFallback
+              ? "This order was assigned once, as part of the whole day's plan the CP-SAT solver optimized jointly across every truck and driver — not ranked against other candidates one at a time."
+              : "Ranked by the model's total value score (immediate value + expected future positioning value) — the top-ranked candidate here is always the one assigned."}
           </p>
-          {loadingCandidates ? (
+          {usingTripFallback ? null : loadingCandidates ? (
             <p className="text-xs text-ink-400">Loading…</p>
           ) : candidates.length === 0 ? (
             <p className="text-xs text-ink-400">No candidates recorded (order still pending or none feasible).</p>

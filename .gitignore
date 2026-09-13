@@ -42,6 +42,9 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Nominatim geocoding response cache (sim/geocode_business_locations.py) -- regeneratable, not source
+sim/cache/
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

@@ -84,7 +84,17 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`${res.status} ${text}`)
+    // FastAPI's HTTPException body is `{"detail": "message"}` -- surface just the message where
+    // present (the Dispatch Board's toasts need a clean sentence, not a raw JSON blob) and fall
+    // back to the raw body for any error shape that isn't that.
+    let detail: string | null = null
+    try {
+      const parsed = JSON.parse(text)
+      if (typeof parsed.detail === 'string') detail = parsed.detail
+    } catch {
+      // not JSON -- fall through to the raw-text error below
+    }
+    throw new Error(detail ?? `${res.status} ${text}`)
   }
   return res.json() as Promise<T>
 }
@@ -111,6 +121,150 @@ export interface OrderDetail {
     truck_number: string | null
     duty_status: string | null
   } | null
+}
+
+// Manual day-ahead Dispatch Board (dashboard/server/main.py's /api/dispatch/* -- backed by
+// sim/live/dispatch_board.py). `date` is an ISO date string or the literal "tomorrow" (resolved
+// server-side -- "a fleet manager always plans tomorrow's work today" is the product's own
+// stated assumption, not a UI nicety).
+export interface DispatchTruck {
+  truck_number: string
+  available: boolean
+  unavailable_reason: string | null
+  truck_type: string
+  capacity_lbs: number
+  capacity_pallets: number
+  length_ft: number
+  inside_height_ft: number
+  width_in: number
+  hub: string
+}
+
+export interface DispatchDriver {
+  driver_id: number
+  available: boolean
+  unavailable_reason: string | null
+  hos_driving_hours_remaining: number
+  hos_duty_hours_remaining: number
+  hos_cycle1_hours_remaining: number
+  hos_cycle2_hours_remaining: number
+  hub: string
+}
+
+export interface DispatchOrder {
+  order_id: string
+  pickup_city: string
+  dest_city: string
+  weight_lbs: number
+  pallets: number
+  load_type: string
+  pickup_at: string
+  delivery_eta: string
+  rate: number
+  pickup_location_id: number
+  dest_location_id: number
+  // Only set once Finalize Dispatch has created the real live.trips row -- null in draft.
+  trip_id: string | null
+  pickup_geofence_source: 'manual' | 'default'
+  dropoff_geofence_source: 'manual' | 'default'
+  // Real, computed diagnosis for why THIS order couldn't be matched (equipment type, capacity,
+  // driver-hub reach, or a scheduling trade-off) -- null while the order is actually assigned.
+  unassigned_reason: string | null
+}
+
+export interface TripGeofenceStop {
+  location_id: number
+  label: string
+  city: string
+  lat: number
+  lon: number
+  default_radius_m: number
+  geofence_source: 'manual' | 'default'
+  manual_geometry: { type: 'Polygon'; coordinates: [number, number][][] } | null
+}
+
+export interface TripDetail {
+  trip_id: string
+  driver_id: number
+  status: string
+  eta: string | null
+  created_at: string | null
+  planned_completion_at: string | null
+  truck_number: string | null
+  truck_type: string | null
+  capacity_lbs: number | null
+  capacity_pallets: number | null
+  weight_lbs: number | null
+  pallets: number | null
+  load_type: string | null
+  pickup: TripGeofenceStop
+  dropoff: TripGeofenceStop
+}
+
+export interface DispatchAssignment {
+  driver_id: number | null
+  order_ids: string[]
+}
+
+export interface DispatchSetupResult {
+  requested_hub_counts: Record<string, number>
+  requested_type_shares: Record<string, number>
+  requested_num_orders: number
+  actual_hub_counts: Record<string, number> | null
+  actual_type_counts: Record<string, number> | null
+  actual_num_orders: number | null
+}
+
+export interface DispatchBoardData {
+  day_id: string
+  service_date: string
+  status: 'draft' | 'finalized'
+  trucks: DispatchTruck[]
+  drivers: DispatchDriver[]
+  orders: DispatchOrder[]
+  assignments: Record<string, DispatchAssignment>
+  // Only present on the payload returned right after a Simulate call, not on a plain board load.
+  setup?: DispatchSetupResult
+}
+
+// Every mutation returns just the truck(s) that actually changed (the target, plus a source truck
+// when an order/driver was re-dragged off it) -- the frontend merges these into local state
+// directly instead of refetching the whole board. Real user feedback: a full load_board() refetch
+// after every drop (several sequential queries against a REMOTE Supabase instance) made each drag
+// feel like a ~2s delay.
+export interface DispatchAssignmentRow extends DispatchAssignment {
+  truck_number: string
+}
+
+// Live Ops "selected truck" full picture -- current trip already comes from api.fleet()
+// (driver_status.current_trip_id), this covers past (completed) and future (queued 'scheduled')
+// trips for that one driver.
+export interface PastTrip {
+  trip_id: string
+  completed_at: string | null
+  on_time: boolean | null
+  origin_city: string | null
+  dest_city: string | null
+  weight_lbs: number | null
+  pallets: number | null
+  load_type: string | null
+}
+
+export interface FutureTrip {
+  trip_id: string
+  status: string
+  eta: string | null
+  planned_completion_at: string | null
+  weight_lbs: number | null
+  pallets: number | null
+  load_type: string | null
+  origin_city: string | null
+  dest_city: string | null
+}
+
+export interface DriverTripHistory {
+  past: PastTrip[]
+  future: FutureTrip[]
 }
 
 export const api = {
@@ -144,4 +298,73 @@ export const api = {
   }) => req<ScoreQuoteResult>(`/orders/${quoteId}/rescore`, { method: 'POST', body: JSON.stringify(body) }),
   cancelOrder: (quoteId: string) =>
     req<{ quote_id: string; status: string }>(`/orders/${quoteId}/cancel`, { method: 'POST' }),
+
+  dispatchBoard: (date = 'tomorrow') => req<DispatchBoardData>(`/dispatch/${date}`),
+  // Real user ask: no more silent auto-generation on first open -- a 404 here means "no day yet,
+  // show the Setup panel" (not an error), so this reads status directly instead of throwing.
+  dispatchBoardIfExists: async (date = 'tomorrow'): Promise<DispatchBoardData | null> => {
+    const res = await fetch(`/api/dispatch/${date}`, { headers: { 'Content-Type': 'application/json' } })
+    if (res.status === 404) return null
+    if (!res.ok) {
+      const text = await res.text()
+      let detail: string | null = null
+      try {
+        const parsed = JSON.parse(text)
+        if (typeof parsed.detail === 'string') detail = parsed.detail
+      } catch {
+        // not JSON -- fall through to the raw-text error below
+      }
+      throw new Error(detail ?? `${res.status} ${text}`)
+    }
+    return res.json() as Promise<DispatchBoardData>
+  },
+  // The Setup panel's "Simulate" button -- picks fleet size/hub mix/type mix/order count directly
+  // instead of the app's old fixed 20-truck/55-30-15/calibrated-volume default.
+  dispatchSimulate: (date: string, body: { hub_counts: Record<string, number>; type_shares: Record<string, number>; num_orders: number }) =>
+    req<DispatchBoardData>(`/dispatch/${date}/simulate`, { method: 'POST', body: JSON.stringify(body) }),
+  dispatchAssignOrder: (date: string, truckNumber: string, orderId: string) =>
+    req<{ assignments: DispatchAssignmentRow[] }>(`/dispatch/${date}/assign-order`, {
+      method: 'POST', body: JSON.stringify({ truck_number: truckNumber, order_id: orderId }),
+    }),
+  dispatchUnassignOrder: (date: string, truckNumber: string, orderId: string) =>
+    req<{ assignments: DispatchAssignmentRow[] }>(`/dispatch/${date}/unassign-order`, {
+      method: 'POST', body: JSON.stringify({ truck_number: truckNumber, order_id: orderId }),
+    }),
+  dispatchAssignDriver: (date: string, truckNumber: string, driverId: number) =>
+    req<{ assignments: DispatchAssignmentRow[] }>(`/dispatch/${date}/assign-driver`, {
+      method: 'POST', body: JSON.stringify({ truck_number: truckNumber, driver_id: driverId }),
+    }),
+  dispatchUnassignDriver: (date: string, truckNumber: string) =>
+    req<{ assignments: DispatchAssignmentRow[] }>(`/dispatch/${date}/unassign-driver`, {
+      method: 'POST', body: JSON.stringify({ truck_number: truckNumber }),
+    }),
+  dispatchAiAssign: (date: string) =>
+    req<{
+      assignments: Record<string, DispatchAssignment>
+      num_assigned_orders: number
+      num_unassigned_orders: number
+      total_net_revenue: number
+      deadhead_miles_total: number
+      has_timeout: boolean
+    }>(`/dispatch/${date}/ai-assign`, { method: 'POST' }),
+  dispatchFinalize: (date: string) => req<{ status: string }>(`/dispatch/${date}/finalize`, { method: 'POST' }),
+  dispatchReopen: (date: string) => req<{ status: string }>(`/dispatch/${date}/reopen`, { method: 'POST' }),
+  dispatchReset: (date: string) =>
+    req<{ assignments: Record<string, DispatchAssignment> }>(`/dispatch/${date}/reset`, { method: 'POST' }),
+  // DEMO-ONLY: swaps in a genuinely different random order book for the same day.
+  dispatchRegenerateOrders: (date: string) => req<DispatchBoardData>(`/dispatch/${date}/regenerate-orders`, { method: 'POST' }),
+
+  driverTrips: (driverId: number) => req<DriverTripHistory>(`/drivers/${driverId}/trips`),
+
+  tripDetail: (tripId: string) => req<TripDetail>(`/trips/${tripId}`),
+  getTripGeofence: (tripId: string, locationId: number) =>
+    req<{ default_radius_m: number; geofence_source: 'manual' | 'default'; manual_geometry: TripGeofenceStop['manual_geometry'] }>(
+      `/trips/${tripId}/geofence?location_id=${locationId}`,
+    ),
+  saveTripGeofence: (tripId: string, locationId: number, points: [number, number][]) =>
+    req<{ status: string }>(`/trips/${tripId}/geofence`, {
+      method: 'POST', body: JSON.stringify({ location_id: locationId, points }),
+    }),
+  clearTripGeofence: (tripId: string, locationId: number) =>
+    req<{ status: string }>(`/trips/${tripId}/geofence?location_id=${locationId}`, { method: 'DELETE' }),
 }

@@ -1,16 +1,17 @@
 import { format } from 'date-fns'
-import { CheckCircle2, Clock, Fuel, Gauge, Loader2, LogIn, LogOut, MapPin, Radar, Receipt, Timer } from 'lucide-react'
+import { CheckCircle2, Clock, Fuel, Gauge, Loader2, LogIn, LogOut, MapPin, PenLine, Radar, Receipt, Timer } from 'lucide-react'
 import * as React from 'react'
 import { FleetMap, type RouteSegment } from '@/components/fleet-map'
+import { GeofenceEditDialog } from '@/components/geofence-map'
 import { LocationPicker } from '@/components/location-picker'
 import { PageHeader } from '@/components/page-header'
 import { SimulationOrderStory } from '@/components/simulation-order-story'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import type { FleetDriver, LocationOption } from '@/lib/api'
+import { api, type FleetDriver, type LocationOption } from '@/lib/api'
 import { getOrderStory } from '@/lib/simulation-api'
 import {
-  getTripDemoLog, startTripDemo, type TripDemoDetention, type TripDemoGeofenceEvent,
+  beginTripDemo, getTripDemoLog, startTripDemo, type TripDemoDetention, type TripDemoGeofenceEvent,
   type TripDemoScenarioKey, type TripDemoTelemetryRow,
 } from '@/lib/trip-demo-api'
 
@@ -88,8 +89,18 @@ export default function SimulationTrip() {
   const [origin, setOrigin] = React.useState<LocationOption | null>(null)
   const [dest, setDest] = React.useState<LocationOption | null>(null)
   const [runs, setRuns] = React.useState<RunsByScenario>({ baseline: null, detention: null })
-  const [storyQuoteId, setStoryQuoteId] = React.useState<string | null>(null)
+  // Real user ask: the two scenarios' invoices need to be clearly told apart when opened, not
+  // just distinguishable by numbers buried inside an otherwise-identical dialog.
+  const [storyContext, setStoryContext] = React.useState<{ quoteId: string; label: string } | null>(null)
   const [launching, setLaunching] = React.useState(false)
+  const [beginning, setBeginning] = React.useState(false)
+  // Real user ask: "first I should have the option to edit geofence, then after I set it it
+  // should start" -- setting up the trip (real trip_ids, needed since geofence overrides are
+  // keyed by trip_id) and actually STARTING it moving are now two separate steps. `runs` existing
+  // means the trip was created; `simStarted` means Start Simulation was clicked. Geofence editing
+  // is only meaningful in the gap between the two -- editing after the truck is already moving
+  // toward/through a stop it's about to pass doesn't do much.
+  const [simStarted, setSimStarted] = React.useState(false)
   const [elapsedSec, setElapsedSec] = React.useState(0)
   const runsRef = React.useRef(runs)
   React.useEffect(() => {
@@ -103,16 +114,19 @@ export default function SimulationTrip() {
   // stuck" even though the trigger is genuinely counting down toward the 2h line underneath it.
   const bothDone = runs.baseline?.status === 'completed' && runs.detention?.status === 'completed'
   React.useEffect(() => {
-    if (!runs.baseline && !runs.detention) return
+    if (!simStarted) return  // the clock represents how long the RUN has been going, not setup time
     if (bothDone) return
     const id = setInterval(() => setElapsedSec((s) => s + 1), 1000)
     return () => clearInterval(id)
-  }, [runs.baseline, runs.detention, bothDone])
+  }, [simStarted, bothDone])
 
-  async function launchBoth() {
+  // Step 1: create both trips (real trip_ids, driver/truck assigned) but DON'T start them moving
+  // yet -- see simStarted's own comment above for why.
+  async function setUpBoth() {
     if (!origin || !dest) return
     setLaunching(true)
     setElapsedSec(0)
+    setSimStarted(false)
     sinceIdRef.current = { baseline: 0, detention: 0 }
     try {
       const [baseline, detention] = await Promise.all(
@@ -128,6 +142,20 @@ export default function SimulationTrip() {
       })
     } finally {
       setLaunching(false)
+    }
+  }
+
+  // Step 2: release both parked trips to actually start ticking -- called once the manager is
+  // done (or has deliberately skipped) setting up custom geofences against the real trip_ids.
+  async function beginBoth() {
+    const ids = [runs.baseline?.trip_id, runs.detention?.trip_id].filter((id): id is string => !!id)
+    if (ids.length === 0) return
+    setBeginning(true)
+    try {
+      await Promise.all(ids.map((id) => beginTripDemo(id).catch(() => null)))
+      setSimStarted(true)
+    } finally {
+      setBeginning(false)
     }
   }
 
@@ -149,8 +177,10 @@ export default function SimulationTrip() {
   // Poll both active runs every 1.5s -- fast enough to feel live against a TIME_SCALE-accelerated
   // trip that finishes in roughly 3-5 real minutes (sim/live/trip_demo_simulator.py). A ref
   // mirror of `runs` keeps this interval's closure from going stale without recreating it on
-  // every telemetry update.
+  // every telemetry update. Gated on simStarted -- nothing to poll before Start Simulation is
+  // clicked, since the trip is created but parked (see beginBoth()'s own comment).
   React.useEffect(() => {
+    if (!simStarted) return
     const id = setInterval(() => {
       (['baseline', 'detention'] as const).forEach(async (key) => {
         const run = runsRef.current[key]
@@ -177,7 +207,7 @@ export default function SimulationTrip() {
       })
     }, 1500)
     return () => clearInterval(id)
-  }, [])
+  }, [simStarted])
 
   // Once a run's status flips to 'completed', fetch its invoice via the same Order Story endpoint
   // the batch Showcase uses (no separate endpoint needed -- sim/live/trip_demo_simulator.py writes
@@ -201,6 +231,7 @@ export default function SimulationTrip() {
   const anyActive = (['baseline', 'detention'] as const).some(
     (k) => runs[k] && runs[k]!.status !== 'completed' && runs[k]!.status !== 'error',
   )
+  const tripsReady = !!(runs.baseline?.trip_id || runs.detention?.trip_id)
 
   return (
     <div className="flex h-full flex-col overflow-auto bg-ink-50">
@@ -213,26 +244,44 @@ export default function SimulationTrip() {
         <div className="flex flex-wrap items-end gap-3 rounded-xl border border-ink-200 bg-white p-4">
           <div className="w-64"><LocationPicker label="Pickup" value={origin} onChange={setOrigin} /></div>
           <div className="w-64"><LocationPicker label="Delivery" value={dest} onChange={setDest} /></div>
+          {/* Real user ask: "first I should have the option to edit geofence, then after I set it
+              it should start" -- Set Up Trip creates real trip_ids (so geofence overrides have
+              something to key against) WITHOUT the truck moving yet; Start Simulation is a
+              separate, deliberate second step. */}
           <Button
+            variant={tripsReady ? 'outline' : 'default'}
             disabled={!origin || !dest || launching || anyActive}
-            onClick={() => void launchBoth()}
+            onClick={() => void setUpBoth()}
           >
             {launching ? <Loader2 className="size-4 animate-spin" /> : <Radar className="size-4" />}
-            Run demo — both scenarios
+            {tripsReady ? 'Set Up New Trip' : 'Set Up Trip'}
           </Button>
-          {(runs.baseline || runs.detention) && (
+          {tripsReady && !simStarted && (
+            <Button onClick={() => void beginBoth()} disabled={beginning}>
+              {beginning ? <Loader2 className="size-4 animate-spin" /> : <Radar className="size-4" />}
+              Start Simulation
+            </Button>
+          )}
+          {simStarted && (
             <div className="flex items-center gap-1.5 rounded-lg border border-ink-200 bg-ink-50 px-3 py-2 text-sm font-medium text-ink-700">
               <Clock className="size-4 text-ink-400" />
               <span className="tabular-nums">{formatClock(elapsedSec)}</span>
               <span className="text-xs font-normal text-ink-400">{bothDone ? 'total' : 'elapsed'}</span>
             </div>
           )}
-          {(!origin || !dest) && <p className="text-xs text-ink-400">Pick a pickup and delivery location to run the demo.</p>}
+          {!origin || !dest ? (
+            <p className="text-xs text-ink-400">Pick a pickup and delivery location to set up the demo.</p>
+          ) : tripsReady && !simStarted ? (
+            <p className="text-xs text-ink-400">Trip created — edit geofences below if you want, then Start Simulation when ready.</p>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           {(['baseline', 'detention'] as const).map((key) => (
-            <ScenarioPanel key={key} scenarioKey={key} run={runs[key]} dest={dest} onOpenStory={setStoryQuoteId} />
+            <ScenarioPanel
+              key={key} scenarioKey={key} run={runs[key]} origin={origin} dest={dest} simStarted={simStarted}
+              onOpenStory={(quoteId) => setStoryContext({ quoteId, label: SCENARIO_META[key].title })}
+            />
           ))}
         </div>
 
@@ -241,19 +290,52 @@ export default function SimulationTrip() {
         )}
       </div>
 
-      {storyQuoteId && <SimulationOrderStory quoteId={storyQuoteId} onClose={() => setStoryQuoteId(null)} />}
+      {storyContext && (
+        <SimulationOrderStory quoteId={storyContext.quoteId} contextLabel={storyContext.label} onClose={() => setStoryContext(null)} />
+      )}
     </div>
   )
 }
 
 function ScenarioPanel({
-  scenarioKey, run, dest, onOpenStory,
+  scenarioKey, run, origin, dest, simStarted, onOpenStory,
 }: {
   scenarioKey: TripDemoScenarioKey
   run: RunState | null
+  origin: LocationOption | null
   dest: LocationOption | null
+  simStarted: boolean
   onOpenStory: (quoteId: string) => void
 }) {
+  // Real user ask: the same pickup+dropoff custom geofence drawing the real dispatch trip detail
+  // page has, here too -- previously this demo only ever showed a fixed 150m dropoff circle.
+  const [editingStop, setEditingStop] = React.useState<'pickup' | 'dropoff' | null>(null)
+  // Real bug found directly: the REAL arrival/departure trigger (simulation.process_position_
+  // tick()) already checked live.trip_geofence_overrides for a saved custom shape and used it
+  // correctly -- but the LIVE map here never knew that shape existed at all, so it kept drawing
+  // the default radius circle regardless of what was actually saved. Fetched independently of
+  // GeofenceEditDialog's own internal state (which disappears the moment that dialog closes) so
+  // the live map can show the real saved shape once editing is done.
+  const [pickupShape, setPickupShape] = React.useState<[number, number][] | null>(null)
+  const [dropoffShape, setDropoffShape] = React.useState<[number, number][] | null>(null)
+  const tripId = run?.trip_id || null
+
+  const refreshGeofenceShapes = React.useCallback(async () => {
+    if (!tripId) return
+    const [pickupStatus, dropoffStatus] = await Promise.all([
+      origin ? api.getTripGeofence(tripId, origin.location_id).catch(() => null) : Promise.resolve(null),
+      dest ? api.getTripGeofence(tripId, dest.location_id).catch(() => null) : Promise.resolve(null),
+    ])
+    // GeoJSON rings are [lon, lat] -- Leaflet wants [lat, lon] (same convention geofence-map.tsx's
+    // toLatLngs() already uses for the edit dialog's own map).
+    setPickupShape(pickupStatus?.manual_geometry?.coordinates[0]?.map(([lon, lat]) => [lat, lon]) ?? null)
+    setDropoffShape(dropoffStatus?.manual_geometry?.coordinates[0]?.map(([lon, lat]) => [lat, lon]) ?? null)
+  }, [tripId, origin, dest])
+
+  React.useEffect(() => {
+    void refreshGeofenceShapes()
+  }, [refreshGeofenceShapes])
+
   const meta = SCENARIO_META[scenarioKey]
   const latest = run?.telemetry[run.telemetry.length - 1] ?? null
   const arrival = run?.geofence_events.find((e) => e.event_type === 'arrival' && e.location_id === dest?.location_id)
@@ -291,7 +373,9 @@ function ScenarioPanel({
   // the one client-side source of that, since LocationOption carries no lat/lon of its own. Falls
   // back to the truck's current position only if the backend's own route fetch failed (map
   // polish, never blocks the run -- see start_trip_demo/route_coords server-side).
+  const routeStart = run?.routeCoords && run.routeCoords.length > 0 ? run.routeCoords[0] : null
   const routeEnd = run?.routeCoords && run.routeCoords.length > 0 ? run.routeCoords[run.routeCoords.length - 1] : null
+  const pickupCenter: [number, number] | null = routeStart ? [routeStart[1], routeStart[0]] : null
   const geofenceCenter: [number, number] | null = routeEnd
     ? [routeEnd[1], routeEnd[0]] // [lon, lat] -> [lat, lon]
     : latest?.lat != null && latest.lon != null ? [latest.lat, latest.lon] : null
@@ -311,8 +395,41 @@ function ScenarioPanel({
           </div>
           <p className="text-xs text-ink-400">{meta.hint}</p>
         </div>
-        {run && <StatusBadge status={run.status} />}
+        {run && (
+          <div className="flex items-center gap-2">
+            {origin && (
+              <Button size="sm" variant="outline" onClick={() => setEditingStop('pickup')}>
+                <PenLine className="size-3.5" /> Pickup Geofence
+              </Button>
+            )}
+            {dest && (
+              <Button size="sm" variant="outline" onClick={() => setEditingStop('dropoff')}>
+                <PenLine className="size-3.5" /> Dropoff Geofence
+              </Button>
+            )}
+            <StatusBadge status={run.status} simStarted={simStarted} />
+          </div>
+        )}
       </div>
+
+      {run && origin && editingStop === 'pickup' && pickupCenter && (
+        <GeofenceEditDialog
+          open onOpenChange={(v) => !v && setEditingStop(null)}
+          tripId={run.trip_id} locationId={origin.location_id} label={`Pickup — ${origin.label}`}
+          lat={pickupCenter[0]} lon={pickupCenter[1]} color="#1baf7a"
+          routeCoords={run.routeCoords} onSaved={() => void refreshGeofenceShapes()}
+          otherStop={geofenceCenter ? { label: `Dropoff — ${dest?.label ?? ''}`, lat: geofenceCenter[0], lon: geofenceCenter[1] } : null}
+        />
+      )}
+      {run && dest && editingStop === 'dropoff' && geofenceCenter && (
+        <GeofenceEditDialog
+          open onOpenChange={(v) => !v && setEditingStop(null)}
+          tripId={run.trip_id} locationId={dest.location_id} label={`Dropoff — ${dest.label}`}
+          lat={geofenceCenter[0]} lon={geofenceCenter[1]} color="#eb6834"
+          routeCoords={run.routeCoords} onSaved={() => void refreshGeofenceShapes()}
+          otherStop={pickupCenter ? { label: `Pickup — ${origin?.label ?? ''}`, lat: pickupCenter[0], lon: pickupCenter[1] } : null}
+        />
+      )}
 
       {!run ? (
         <div className="flex h-72 items-center justify-center text-sm text-ink-400">Not started</div>
@@ -325,7 +442,14 @@ function ScenarioPanel({
               drivers={driverForMap}
               satellite={false}
               routes={routes}
-              geofences={geofenceCenter ? [{ lat: geofenceCenter[0], lon: geofenceCenter[1], radiusM: 150, label: 'Delivery geofence', active: insideGeofence }] : []}
+              geofences={[
+                ...(pickupCenter
+                  ? [{ lat: pickupCenter[0], lon: pickupCenter[1], radiusM: 120, label: 'Pickup geofence', polygon: pickupShape ?? undefined }]
+                  : []),
+                ...(geofenceCenter
+                  ? [{ lat: geofenceCenter[0], lon: geofenceCenter[1], radiusM: 150, label: 'Delivery geofence', active: insideGeofence, polygon: dropoffShape ?? undefined }]
+                  : []),
+              ]}
               fitTo={latest?.lat != null && latest.lon != null ? [[latest.lat, latest.lon]] : undefined}
               focusZoom={focusZoom}
             />
@@ -351,17 +475,28 @@ function ScenarioPanel({
             {detentionRow && detentionRow.departure_at && detentionRow.amount === 0 && (
               <AlertRow icon={CheckCircle2} tone="green" text="Departed within the free 2h window — no detention" />
             )}
-            {!arrival && run.status !== 'completed' && <p className="text-xs text-ink-400">Watching for geofence arrival…</p>}
+            {!arrival && run.status !== 'completed' && (
+              <p className="text-xs text-ink-400">
+                {simStarted ? 'Watching for geofence arrival…' : 'Not started yet — edit geofences above, then Start Simulation.'}
+              </p>
+            )}
           </div>
 
           <div className="max-h-40 overflow-auto p-3">
             <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-ink-400">Live log — every {LOG_DISPLAY_GAP_MINUTES} sim-minutes</p>
             <div className="flex flex-col gap-1">
+              {/* Real user ask: the every-2-min log should show GPS coordinates, speed, and fuel
+                  in addition to what's already there -- all real fields this row already carries
+                  (trip-demo-api.ts's TripDemoTelemetryRow), just not previously surfaced here. */}
               {[...thinForDisplay(run.telemetry)].reverse().map((row) => (
                 <div key={row.id} className="flex items-center gap-2 text-[11px] text-ink-500">
                   <span className="w-16 shrink-0 tabular-nums text-ink-400">{format(new Date(row.recorded_at), 'HH:mm:ss')}</span>
                   <span className="flex-1 truncate">{row.note ?? phaseLabel(row.phase)}</span>
-                  {row.speed_mph != null && <span className="tabular-nums">{row.speed_mph.toFixed(0)} mph</span>}
+                  {row.lat != null && row.lon != null && (
+                    <span className="shrink-0 tabular-nums text-ink-400">{row.lat.toFixed(4)}, {row.lon.toFixed(4)}</span>
+                  )}
+                  {row.speed_mph != null && <span className="shrink-0 tabular-nums">{row.speed_mph.toFixed(0)} mph</span>}
+                  {row.fuel_pct != null && <span className="shrink-0 tabular-nums text-ink-400">{row.fuel_pct.toFixed(0)}% fuel</span>}
                 </div>
               ))}
               {run.telemetry.length === 0 && <p className="text-xs text-ink-400">Waiting for the first tick…</p>}
@@ -381,10 +516,12 @@ function ScenarioPanel({
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, simStarted }: { status: string; simStarted: boolean }) {
   if (status === 'completed') return <Badge tone="green">completed</Badge>
   if (status === 'error') return <Badge tone="red">error</Badge>
-  if (status === 'assigned') return <Badge tone="gray">starting…</Badge>
+  // 'assigned' covers BOTH "created, parked, waiting for Start Simulation" and the brief instant
+  // right after it's released before the first tick lands -- simStarted tells them apart.
+  if (status === 'assigned') return <Badge tone={simStarted ? 'gray' : 'amber'}>{simStarted ? 'starting…' : 'ready — not started'}</Badge>
   return <Badge tone="blue">running</Badge>
 }
 

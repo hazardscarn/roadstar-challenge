@@ -135,6 +135,10 @@ def load_sim_data() -> SimData:
                 hub_ids['London'] = loc_id
             elif 'Milton' in label:
                 hub_ids['Milton'] = loc_id
+            elif 'Barrie' in label:
+                # Real 3rd hub (sim/sql/048_dispatch_board.sql) -- was only an ASSUMED
+                # driver-home-hub anchor via a proxy customer location before this.
+                hub_ids['Barrie'] = loc_id
 
         cur.execute("select origin_location_id, dest_location_id, weight from calibration.lane_frequency")
         lane_weights = [(o, d, float(w)) for o, d, w in cur.fetchall()]
@@ -1103,7 +1107,11 @@ def run_simulation(
                 apply_idle_reset(drv.hos_log, eff_start)
                 hos_state = drv.hos_log.snapshot(eff_start)
                 planned_driving = dh_hours + order.loaded_hours
-                planned_duty = planned_driving + 1.5  # rough pickup+delivery dwell estimate, for feasibility only
+                # Real user correction: this used to be a flat "+1.5" guess -- now the real
+                # calibrated median dwell (pickup + delivery, ~1.0h combined), same figure
+                # sim/dispatch_solver.py's dwell_hours_per_order() and every other real-dwell call
+                # site in this project already uses, not a second, independent number.
+                planned_duty = planned_driving + data.dwell_minutes['pickup'][1] / 60 + data.dwell_minutes['delivery'][1] / 60
 
                 home_hub_id = driver_home_hub_id(data, driver_id)
                 home_miles_now, home_hours_now = get_route(data, eff_location_id, home_hub_id)

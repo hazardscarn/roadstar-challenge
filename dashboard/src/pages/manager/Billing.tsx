@@ -6,9 +6,11 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { supabase } from '@/lib/supabase'
 
-// live.invoices (sim/sql/030, RLS as of sim/sql/036) -- real CRA-itemized invoicing against
-// completed trips. PDF generation + "mark as sent" only, per the confirmed decision: real email
-// delivery is deferred until an email provider is chosen, stated in the UI, not silently faked.
+// simulation.invoices (sim/sql/038) -- real CRA-itemized invoicing against the AI-dispatch
+// replay's completed trips (real user pivot: the simulation is now the app's only data source,
+// live.* is dropped). PDF generation + "mark as sent" only, per the confirmed decision: real
+// email delivery is deferred until an email provider is chosen, stated in the UI, not silently
+// faked.
 const POLL_MS = 15000
 
 interface TripToInvoice {
@@ -43,13 +45,17 @@ export default function Billing() {
   const [sendingId, setSendingId] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
 
+  // Real user pivot: the simulation is now the app's only data source -- sim/live/
+  // ai_dispatch_replay.py's generate() already auto-creates a draft invoice per trip right after
+  // a replay, so "Ready to invoice" below should normally be empty (everything's already
+  // invoiced); the Generate button stays as an idempotent fallback, not the primary path.
   const refresh = React.useCallback(async () => {
-    const { data: invs } = await supabase.schema('live').from('invoices').select('*').order('issued_at', { ascending: false })
+    const { data: invs } = await supabase.schema('simulation').from('invoices').select('*').order('issued_at', { ascending: false })
     setInvoices((invs as unknown as InvoiceRow[]) ?? [])
     const invoicedTripIds = new Set((invs ?? []).map((i) => i.trip_id))
 
     const { data: logs } = await supabase
-      .schema('live')
+      .schema('simulation')
       .from('trip_log')
       .select('trip_id,driver_id,truck_number,completed_at,loaded_miles')
       .order('completed_at', { ascending: false })

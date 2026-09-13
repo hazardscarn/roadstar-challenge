@@ -43,11 +43,6 @@ const columns: ColumnDef<FleetDriver>[] = [
       return <span className={v < 20 ? 'font-medium text-status-red-500' : ''}>{v.toFixed(0)}%</span>
     },
   },
-  {
-    accessorKey: 'inspection_ok',
-    header: 'Inspection',
-    cell: (c) => <Badge tone={c.getValue() ? 'green' : 'red'}>{c.getValue() ? 'OK' : 'Missing'}</Badge>,
-  },
   { accessorKey: 'trip_status', header: 'Trip', cell: (c) => (c.getValue() as string) ?? '—' },
 ]
 

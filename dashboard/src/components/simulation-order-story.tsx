@@ -16,7 +16,17 @@ function toRoute(trajectory: [number, number, number][], color: string, weight?:
 // happened, the trip log updates, and the subsequent trip if any (was this guy having a
 // deadhead)." A full-screen drill-in, not a new route -- keeps the live playback state (cursor,
 // map) intact underneath while this is open.
-export function SimulationOrderStory({ quoteId, onClose }: { quoteId: string; onClose: () => void }) {
+export function SimulationOrderStory({
+  quoteId, onClose, contextLabel,
+}: {
+  quoteId: string
+  onClose: () => void
+  // Real user ask: the Simulation Trip page runs the SAME lane twice (normal vs. extended dock
+  // time) and opens this same shared dialog for either -- without a caller-supplied label, both
+  // look identical at a glance except for the numbers buried inside. Optional since the batch
+  // Showcase page (this dialog's other caller) has no "scenario" concept at all.
+  contextLabel?: string
+}) {
   const [story, setStory] = React.useState<OrderStory | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
@@ -38,7 +48,10 @@ export function SimulationOrderStory({ quoteId, onClose }: { quoteId: string; on
       >
         <div className="flex items-center justify-between border-b border-ink-200 px-5 py-3">
           <div>
-            <h2 className="font-display text-lg font-bold text-ink-900">Order story</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="font-display text-lg font-bold text-ink-900">Order story</h2>
+              {contextLabel && <Badge tone="blue">{contextLabel}</Badge>}
+            </div>
             <p className="text-xs text-ink-400">quote {quoteId.slice(0, 8)} — from quote to delivery, every real step</p>
           </div>
           <button onClick={onClose} className="rounded-md p-1.5 text-ink-400 hover:bg-ink-100"><X className="size-5" /></button>

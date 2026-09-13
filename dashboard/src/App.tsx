@@ -3,11 +3,10 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import DriverLayout from '@/layouts/DriverLayout'
 import ManagerLayout from '@/layouts/ManagerLayout'
 import Billing from '@/pages/manager/Billing'
-import Dispatch from '@/pages/manager/Dispatch'
+import Data from '@/pages/manager/Data'
+import DispatchBoard from '@/pages/manager/DispatchBoard'
 import Drivers from '@/pages/manager/Drivers'
 import FleetHealth from '@/pages/manager/FleetHealth'
-import LiveOps from '@/pages/manager/LiveOps'
-import Orders from '@/pages/manager/Orders'
 import SimulationShowcase from '@/pages/manager/SimulationShowcase'
 import SimulationTrip from '@/pages/manager/SimulationTrip'
 import TripHistory from '@/pages/manager/TripHistory'
@@ -33,14 +32,16 @@ export default function App() {
             </RequireRole>
           }
         >
-          <Route index element={<LiveOps />} />
-          <Route path="dispatch" element={<Dispatch />} />
-          <Route path="orders" element={<Orders />} />
+          {/* Real user ask: Live Ops (the always-on live.* telemetry feed) is dropped -- the
+              simulation is now the app's only data source. Simulation Showcase (the AI-dispatch
+              full-day replay) takes over the Live Ops slot, renamed "Live Ops Simulation". */}
+          <Route index element={<SimulationShowcase />} />
+          <Route path="dispatch" element={<DispatchBoard />} />
           <Route path="trips" element={<TripHistory />} />
           <Route path="fleet-health" element={<FleetHealth />} />
           <Route path="drivers" element={<Drivers />} />
           <Route path="billing" element={<Billing />} />
-          <Route path="simulation" element={<SimulationShowcase />} />
+          <Route path="data" element={<Data />} />
           <Route path="simulation-trip" element={<SimulationTrip />} />
         </Route>
 

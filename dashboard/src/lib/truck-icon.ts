@@ -10,9 +10,22 @@ const TRUCK_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" s
   <circle cx="17.5" cy="17.5" r="1.6" fill="white"/>
 </svg>`
 
+// Real bug found directly: this used to build a brand-new L.divIcon on every call. Called inline
+// as a Marker prop, that means a NEW icon object every render -- react-leaflet sees the changed
+// reference and calls the underlying marker's setIcon(), which tears down and rebuilds that
+// marker's DOM node. With dozens of trucks re-rendering every animation frame during playback
+// (up to 60fps), that's constant needless DOM churn -- exactly the "lag and stuck" feel reported.
+// Only a small, bounded set of (color, selected) combinations ever occurs (the fixed status
+// palette x selected/not), so caching by that key means an unchanged marker gets back the SAME
+// icon object and react-leaflet skips setIcon() entirely.
+const iconCache = new Map<string, L.DivIcon>()
+
 export function truckIcon(color: string, selected = false) {
+  const key = `${color}|${selected}`
+  const cached = iconCache.get(key)
+  if (cached) return cached
   const size = selected ? 34 : 28
-  return L.divIcon({
+  const icon = L.divIcon({
     className: '',
     html: `<div style="
       width:${size}px;height:${size}px;border-radius:9999px;background:${color};
@@ -22,4 +35,6 @@ export function truckIcon(color: string, selected = false) {
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   })
+  iconCache.set(key, icon)
+  return icon
 }
