@@ -1113,14 +1113,22 @@ function TripDetailDialog({ tripId, onOpenChange }: { tripId: string | null; onO
   // exactly like "I drew a shape, there was no save option, and it just went back to default" --
   // the draw itself worked, but a failure had zero visible feedback either way.
   const [saveError, setSaveError] = React.useState<string | null>(null)
+  const [loadError, setLoadError] = React.useState<string | null>(null)
 
+  // Real bug found directly: this had no catch block at all -- a failed fetch (a redeploy mid-
+  // rollout, a network blip) threw into an unhandled promise rejection with trip/routeCoords
+  // stuck at their initial null. The dialog's own render guard (`loading || !trip`) then showed
+  // the loading spinner FOREVER with no error, no retry -- indistinguishable from "broken."
   const load = React.useCallback(async (id: string) => {
     setLoading(true)
+    setLoadError(null)
     try {
       const detail = await api.tripDetail(id)
       setTrip(detail)
       const route = await api.route(detail.pickup.location_id, detail.dropoff.location_id)
       setRouteCoords(route.coordinates)
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not load this trip')
     } finally {
       setLoading(false)
     }
@@ -1130,6 +1138,7 @@ function TripDetailDialog({ tripId, onOpenChange }: { tripId: string | null; onO
     setEditingLocationId(null)
     setDrawnPoints(null)
     setSaveError(null)
+    setLoadError(null)
     if (tripId) {
       void load(tripId)
     } else {
@@ -1173,8 +1182,14 @@ function TripDetailDialog({ tripId, onOpenChange }: { tripId: string | null; onO
         <DialogHeader>
           <DialogTitle>Trip Detail{trip ? ` · Driver #${trip.driver_id} · Truck ${trip.truck_number ?? '—'}` : ''}</DialogTitle>
         </DialogHeader>
-        {loading || !trip ? (
+        {loading ? (
           <div className="flex h-96 items-center justify-center text-ink-400"><Loader2 className="size-5 animate-spin" /></div>
+        ) : loadError || !trip ? (
+          <div className="flex h-96 flex-col items-center justify-center gap-3 text-center">
+            <AlertTriangle className="size-6 text-status-red-500" />
+            <p className="text-sm text-ink-600">{loadError ?? 'Could not load this trip'}</p>
+            <Button size="sm" variant="outline" onClick={() => tripId && void load(tripId)}>Try again</Button>
+          </div>
         ) : (
           <div className="grid grid-cols-[320px_minmax(0,1fr)] gap-5">
             <div className="flex flex-col gap-3.5">

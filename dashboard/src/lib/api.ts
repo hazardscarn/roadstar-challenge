@@ -85,16 +85,26 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const text = await res.text()
     // FastAPI's HTTPException body is `{"detail": "message"}` -- surface just the message where
-    // present (the Dispatch Board's toasts need a clean sentence, not a raw JSON blob) and fall
-    // back to the raw body for any error shape that isn't that.
+    // present (the Dispatch Board's toasts need a clean sentence, not a raw JSON blob).
+    //
+    // Real bug found directly: a non-JSON error body used to fall through to the RAW response
+    // text verbatim -- if Vercel's own edge ever serves its standalone error page instead of
+    // proxying through to the backend (a cold-start timeout on the Railway backend, a deploy in
+    // progress, any edge-level hiccup), that's a full HTML document, and this threw it as the
+    // Error's own message. Whatever caught that error then rendered that raw HTML text wherever
+    // it normally shows a one-line error -- exactly "the page looks broken," when the real
+    // backend never even saw the request. Falls back to a short, generic, always-safe message
+    // instead of ever putting an unknown response body on screen.
     let detail: string | null = null
     try {
       const parsed = JSON.parse(text)
       if (typeof parsed.detail === 'string') detail = parsed.detail
     } catch {
-      // not JSON -- fall through to the raw-text error below
+      // not JSON -- this did NOT come from our own FastAPI backend (which always returns JSON
+      // errors), so never show its raw body -- could be an edge/proxy error page, an HTML 500
+      // from an unrelated layer, anything.
     }
-    throw new Error(detail ?? `${res.status} ${text}`)
+    throw new Error(detail ?? `Request failed (${res.status}) -- please try again`)
   }
   return res.json() as Promise<T>
 }
@@ -307,17 +317,26 @@ export const api = {
   // show the Setup panel" (not an error), so this reads status directly instead of throwing.
   dispatchBoardIfExists: async (date = 'tomorrow'): Promise<DispatchBoardData | null> => {
     const res = await fetch(`/api/dispatch/${date}`, { headers: { 'Content-Type': 'application/json' } })
-    if (res.status === 404) return null
+    // Real bug found directly: our own FastAPI backend always returns JSON, including its 404s
+    // (`{"detail": "..."}`) -- but if Vercel's edge itself can't reach the backend at all (a
+    // redeploy mid-rollout, a cold-start timeout) it serves ITS OWN html "NOT_FOUND" page as a
+    // 404, which this used to treat identically to a real "no dispatch day yet" 404 -- silently
+    // showing the Setup panel instead of a real error. Content-Type distinguishes the two.
+    const isRealAppResponse = (res.headers.get('content-type') ?? '').includes('application/json')
+    if (res.status === 404 && isRealAppResponse) return null
     if (!res.ok) {
       const text = await res.text()
       let detail: string | null = null
-      try {
-        const parsed = JSON.parse(text)
-        if (typeof parsed.detail === 'string') detail = parsed.detail
-      } catch {
-        // not JSON -- fall through to the raw-text error below
+      if (isRealAppResponse) {
+        try {
+          const parsed = JSON.parse(text)
+          if (typeof parsed.detail === 'string') detail = parsed.detail
+        } catch {
+          // fall through -- treat as an unknown error below
+        }
       }
-      throw new Error(detail ?? `${res.status} ${text}`)
+      // Never show a non-JSON response body verbatim -- see req()'s own version of this fix.
+      throw new Error(detail ?? `Request failed (${res.status}) -- please try again`)
     }
     return res.json() as Promise<DispatchBoardData>
   },
