@@ -11,6 +11,20 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 
+// Real crash found and fixed directly (user report: whole page went blank in the deployed app,
+// worked fine locally): importing leaflet-draw globally registers `L.Map.TouchExtend` as a
+// DEFAULT option (`L.Map.mergeOptions({ touchExtend: true })`) on the Leaflet Map class itself --
+// affecting every <MapContainer> in the whole app the moment this module loads, not just this
+// dialog's own map. That handler binds a `"touchleave"` DOM listener, which isn't a real browser
+// event; Leaflet 1.9.x's own event validation throws `wrong event specified: touchleave` the
+// instant it tries. This only fires on a TOUCH-CAPABLE browser/device (a touchscreen laptop,
+// mobile, or DevTools device emulation) -- explains "works locally" (a mouse-only desktop never
+// hits this code path) vs. crashing on whatever touch-capable setup hit the deployed app. This is
+// a known, unmaintained leaflet-draw/modern-Leaflet incompatibility (leaflet-draw hasn't shipped a
+// fix since 2022); the feature it powers (legacy touch vertex-dragging) is obsolete now that
+// Leaflet core handles touch natively, so disabling it costs nothing real.
+L.Map.mergeOptions({ touchExtend: false })
+
 // Real user ask: a manager clicks "Edit Geofence" on a trip, the map lets them zoom in, then pick
 // a pencil/draw tool from a side toolbar and draw the exact shape they want checked -- overwriting
 // the default radius circle for that one trip's pickup or dropoff. Built on leaflet-draw (the
