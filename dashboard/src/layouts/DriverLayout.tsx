@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 // 4 destinations, mobile-first: bottom tab bar under 640px (real driver-app pattern), left rail
 // on desktop for the same responsive web view the brief explicitly allows in place of a native app.
 const NAV = [
-  { to: '/driver', label: 'Home', icon: Home, end: true },
+  { to: '/driver', label: 'Driver Assist', icon: Home, end: true },
   { to: '/driver/inspection', label: 'Inspection', icon: ClipboardCheck },
   { to: '/driver/stats', label: 'My Stats', icon: BarChart3 },
   { to: '/driver/truck', label: 'My Truck', icon: Truck },
@@ -19,9 +19,9 @@ export default function DriverLayout() {
       <header className="flex items-center justify-between border-b border-ink-200 bg-white px-4 py-3 sm:hidden">
         <div className="flex items-center gap-2">
           <div className="flex size-7 items-center justify-center rounded-lg bg-brand-600 font-display text-xs font-bold text-white">
-            R
+            A
           </div>
-          <span className="font-display text-sm font-bold text-ink-900">RoadStar</span>
+          <span className="font-display text-sm font-bold text-ink-900">Alfred</span>
         </div>
         <button onClick={() => void signOut()} className="text-xs text-ink-500">
           Sign out
@@ -31,10 +31,10 @@ export default function DriverLayout() {
       <aside className="hidden w-52 shrink-0 flex-col border-r border-ink-200 bg-white sm:flex">
         <div className="flex items-center gap-2 border-b border-ink-200 px-4 py-4">
           <div className="flex size-8 items-center justify-center rounded-lg bg-brand-600 font-display text-sm font-bold text-white">
-            R
+            A
           </div>
           <div>
-            <div className="font-display text-sm font-bold text-ink-900 leading-tight">RoadStar</div>
+            <div className="font-display text-sm font-bold text-ink-900 leading-tight">Alfred</div>
             <div className="text-[11px] text-ink-400 leading-tight">Driver</div>
           </div>
         </div>

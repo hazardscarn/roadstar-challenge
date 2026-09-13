@@ -6,8 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { useAuth } from '@/lib/auth-context'
-import { supabase } from '@/lib/supabase'
+import { submitInspection } from '@/lib/driver-api'
 
 // The real live.vehicle_inspections schema (sim/sql/006 -- brakes/tires/lights/fluids/coupling/
 // trailer + defects notes + overall_pass generated column). Verified against FMCSA 49 CFR
@@ -18,6 +17,12 @@ import { supabase } from '@/lib/supabase'
 // exactly the "don't invent scope, but don't hide a real gap either" instruction this project
 // has followed throughout. Changing the schema itself is a real scope decision for the user, not
 // made unilaterally here.
+//
+// Real bug fixed: this used to write directly to live.driver_status/live.vehicle_inspections via
+// the browser's Supabase client -- live.driver_status is dead (nothing populates it since the
+// simulation-as-sole-data-source pivot), so truck_number always came back null. Now goes through
+// /api/driver/inspection, which resolves the real truck from today's actual Dispatch Board
+// assignment server-side.
 const CHECKS: { key: keyof FormState; label: string }[] = [
   { key: 'brakes_ok', label: 'Brakes' },
   { key: 'tires_ok', label: 'Tires' },
@@ -37,50 +42,40 @@ interface FormState {
 }
 
 export default function Inspection() {
-  const { profile } = useAuth()
   const [form, setForm] = React.useState<FormState>({
     brakes_ok: true, tires_ok: true, lights_ok: true, fluid_levels_ok: true, coupling_ok: true, trailer_ok: true,
   })
   const [odometer, setOdometer] = React.useState('')
   const [defects, setDefects] = React.useState('')
-  const [truckNumber, setTruckNumber] = React.useState<string | null>(null)
   const [submitting, setSubmitting] = React.useState(false)
-  const [result, setResult] = React.useState<{ pass: boolean } | null>(null)
+  const [result, setResult] = React.useState<{ pass: boolean; truckNumber: string | null } | null>(null)
   const [error, setError] = React.useState<string | null>(null)
-
-  React.useEffect(() => {
-    if (!profile?.driver_id) return
-    supabase.schema('live').from('driver_status').select('truck_number').eq('driver_id', profile.driver_id).maybeSingle()
-      .then(({ data }) => setTruckNumber((data?.truck_number as string) ?? null))
-  }, [profile?.driver_id])
 
   const overallPass = Object.values(form).every(Boolean)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!profile?.driver_id) return
     setSubmitting(true)
     setError(null)
-    const { error: insertError } = await supabase.schema('live').from('vehicle_inspections').insert({
-      driver_id: profile.driver_id,
-      truck_number: truckNumber,
-      odometer_km: odometer ? Number(odometer) : null,
-      defects_noted: defects || null,
-      ...form,
-    })
-    setSubmitting(false)
-    if (insertError) {
-      setError(insertError.message)
-      return
+    try {
+      const res = await submitInspection({
+        ...form,
+        odometer_km: odometer ? Number(odometer) : null,
+        defects_noted: defects || null,
+      })
+      setResult({ pass: res.overall_pass, truckNumber: res.truck_number })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not submit inspection')
+    } finally {
+      setSubmitting(false)
     }
-    setResult({ pass: overallPass })
   }
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-4 p-4 sm:p-6">
       <div>
         <h1 className="font-display text-lg font-bold text-ink-900">Pre-Trip Inspection</h1>
-        <p className="text-sm text-ink-500">Truck {truckNumber ?? '—'} — required before going available.</p>
+        <p className="text-sm text-ink-500">Required before your first trip today.</p>
       </div>
 
       {result ? (
@@ -89,7 +84,7 @@ export default function Inspection() {
             {result.pass ? (
               <>
                 <CheckCircle2 className="size-10 text-status-green-500" />
-                <p className="font-medium text-ink-800">Inspection passed — you're clear to go available.</p>
+                <p className="font-medium text-ink-800">Inspection passed{result.truckNumber ? ` — Truck ${result.truckNumber}` : ''} — you're clear to go.</p>
               </>
             ) : (
               <>

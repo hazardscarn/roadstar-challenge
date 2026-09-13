@@ -28,10 +28,10 @@ export default function ManagerLayout() {
       <aside className="flex w-56 shrink-0 flex-col border-r border-ink-200 bg-white">
         <div className="flex items-center gap-2 border-b border-ink-200 px-4 py-4">
           <div className="flex size-8 items-center justify-center rounded-lg bg-brand-600 font-display text-sm font-bold text-white">
-            R
+            A
           </div>
           <div>
-            <div className="font-display text-sm font-bold text-ink-900 leading-tight">RoadStar</div>
+            <div className="font-display text-sm font-bold text-ink-900 leading-tight">Alfred</div>
             <div className="text-[11px] text-ink-400 leading-tight">Dispatch — Manager</div>
           </div>
         </div>

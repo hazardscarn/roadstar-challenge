@@ -140,7 +140,7 @@ def load_board(service_date: date_type) -> dict:
         cur.execute("""
             select o.id, ol.label, ol.city, dl.label, dl.city, o.weight_lbs, o.pallets,
                    o.load_type, o.pickup_at, o.delivery_eta, o.rate,
-                   o.pickup_location_id, o.dest_location_id,
+                   o.pickup_location_id, o.dest_location_id, o.accepted_at,
                    -- Real bug found directly: reopen_day() CANCELS a trip, it doesn't delete it
                    -- (sim/sql/052's own docstring), so a day that's been finalized/edited/
                    -- re-finalized more than once can have SEVERAL live.trips rows for the same
@@ -177,12 +177,16 @@ def load_board(service_date: date_type) -> dict:
                 'pickup_at': r[8].isoformat(), 'delivery_eta': r[9].isoformat(),
                 'rate': float(r[10]),
                 'pickup_location_id': r[11], 'dest_location_id': r[12],
+                # Real user ask: "how does the dispatch know the driver have accepted trips...
+                # can the manager view see it?" -- set by the driver's own POST /api/driver/
+                # accept-order (dashboard/server/main.py), read back here so the board can show it.
+                'accepted_at': r[13].isoformat() if r[13] else None,
                 # Only set once dispatch.finalize_day() has created the real live.trips row --
                 # null while still in draft, which is exactly when a trip detail page/geofence
                 # makes no sense yet (nothing is actually running).
-                'trip_id': str(r[13]) if r[13] else None,
-                'pickup_geofence_source': 'manual' if r[14] else 'default',
-                'dropoff_geofence_source': 'manual' if r[15] else 'default',
+                'trip_id': str(r[14]) if r[14] else None,
+                'pickup_geofence_source': 'manual' if r[15] else 'default',
+                'dropoff_geofence_source': 'manual' if r[16] else 'default',
             }
             for r in cur.fetchall()
         ]

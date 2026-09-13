@@ -20,6 +20,7 @@ import {
   buildTimeline, listAiDispatchRuns, loadAiDispatchRun, positionAt, runAiDispatchSimulation,
   type AiDispatchRunListItem, type SimulationRunResult, type SimTrip, type TimelineEvent,
 } from '@/lib/simulation-api'
+import { formatSimTime } from '@/lib/utils'
 
 // Real user ask: the old default (1,000×) played back so fast it was "hard to notice" -- 200× is
 // now the default, slow enough to actually watch a truck move leg to leg.
@@ -55,7 +56,7 @@ function fmtClock(seconds: number): string {
 // with the actual real-world clock time inside the simulated day (result.sim_start + cursor).
 function fmtSimTime(simStart: string, seconds: number): string {
   const t = new Date(new Date(simStart).getTime() + seconds * 1000)
-  return format(t, 'EEE, MMM d · h:mm a')
+  return formatSimTime(t, 'EEE, MMM d · h:mm a')
 }
 
 const EVENT_LABEL: Record<TimelineEvent['kind'], string> = {

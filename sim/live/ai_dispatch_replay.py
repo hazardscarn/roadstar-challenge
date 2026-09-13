@@ -51,7 +51,9 @@ from sim.dispatch_solver import dwell_hours_per_order
 from sim.engine.route_interpolation import get_route_geometry, interpolate_position, route_distance_km
 from sim.engine.run_sim import load_sim_data
 
-DAY_START_HOUR = 6  # matches sim/dispatch_solver.py's own labeled assumption
+DAY_START_HOUR = 3  # matches sim/dispatch_solver.py's own real-data-grounded assumption (real user
+# correction: checked directly, 7.6% of real historical pickups happen before 06:00, almost all of
+# it in the 03:00-06:00 window -- a fixed 06:00 floor was structurally blocking early pickups)
 DETENTION_RATE_PER_HR_CAD = 75.0  # matches sim/sql/044's own coalesce() fallback
 AVG_HIGHWAY_SPEED_KMH = 95.0
 AVG_CITY_SPEED_KMH = 40.0
@@ -200,9 +202,27 @@ def generate(service_date: date, seed: int | None = None) -> dict:
             dh_coords, _ = get_route_geometry(data, prev_loc, order['pickup_location_id'])
             dh_km = route_distance_km(dh_coords)
             dh_hours = dh_km / AVG_HIGHWAY_SPEED_KMH if dh_km else 0.0
+            # Real bug found directly: this used to chain PURE travel/dwell durations from
+            # t_cursor_s=0 with zero reference to order['pickup_at'] (the real scheduled time from
+            # dispatch.day_orders) -- every truck's simulated day started at sim_start regardless
+            # of whether its first real pickup was at 6am or 8pm, so the whole replay ran as a
+            # compressed physics-only chain, finishing hours before a real fleet's actual day would
+            # and totally disconnected from the real times shown in the Order Book/Dispatch Board.
+            real_pickup_offset_s = max(0.0, (order['pickup_at'] - sim_start).total_seconds())
             assigned_at_s = t_cursor_s
-            arr_pickup_s = assigned_at_s + dh_hours * 3600
-            dh_samples, fuel = _sample_leg(dh_coords, assigned_at_s, arr_pickup_s, rng, fuel)
+            if idx == 0:
+                # First leg only: the truck has a free choice of hub-departure time (bounded below
+                # by sim_start itself) -- delay departure to arrive just-in-time for the REAL
+                # scheduled pickup, instead of always leaving immediately at sim_start.
+                assigned_at_s = max(0.0, real_pickup_offset_s - dh_hours * 3600)
+            physical_arr_s = assigned_at_s + dh_hours * 3600
+            # Chained legs can't leave earlier than they actually become free (idx>0's
+            # assigned_at_s above) -- if that means arriving before the NEXT order's real scheduled
+            # time, the truck waits (arr_pickup_s reflects the real time, not an early grab); if it
+            # can't make the real time at all, this is genuine lateness, same as the solver's own
+            # feasibility check already prices in.
+            arr_pickup_s = max(physical_arr_s, real_pickup_offset_s)
+            dh_samples, fuel = _sample_leg(dh_coords, assigned_at_s, physical_arr_s, rng, fuel)
 
             dep_pickup_s = arr_pickup_s + pickup_dwell_h * 3600
 
@@ -294,24 +314,33 @@ def generate(service_date: date, seed: int | None = None) -> dict:
                 price['linehaul_amount'], detention_amount, price['fuel_surcharge_amount'], 0.0, 'draft',
             ))
             # Event-driven snapshots (assigned/arrived-pickup/departed-pickup/arrived-delivery/
-            # completed), per simulation.driver_state_snapshots' own schema comment -- HOS remaining
-            # is a straightforward elapsed-time deduction from the driver's real day-start figure
-            # (dispatch.day_drivers), not re-simulated to the minute; good enough for a real,
-            # populated demo table, not a second HOS engine.
+            # completed), per simulation.driver_state_snapshots' own schema comment.
+            #
+            # Real bug found directly (exposed by the real-pickup-time anchoring fix above): HOS
+            # remaining used to be deducted by RAW WALL-CLOCK OFFSET (t_s/3600) from day start, which
+            # was only ever correct by coincidence -- before that fix, t_s always equalled real
+            # worked hours exactly, since every truck's timeline was one unbroken chain of work with
+            # no gaps. Now that a truck can legitimately wait for a later real scheduled pickup (or
+            # simply not start until well after sim_start), wall-clock offset can hugely exceed
+            # actual hours WORKED, so every driver's HOS floored at 0 almost immediately -- a real
+            # ELD clock only depletes during real on-duty time, never while idle/waiting. Fixed by
+            # deducting the driver's own accumulated on-duty hours (driving + dwell, exactly what
+            # driver_hours_used already tracks below) at each checkpoint instead of elapsed time.
             hos_drive_start, hos_duty_start = driver_hos.get(driver_id, (0.0, 0.0))
-            for t_s, loc_id, duty in (
-                (assigned_at_s, prev_loc, 'on_duty_not_driving'),
-                (arr_pickup_s, order['pickup_location_id'], 'on_duty_not_driving'),
-                (dep_pickup_s, order['pickup_location_id'], 'driving'),
-                (arr_delivery_s, order['dest_location_id'], 'on_duty_not_driving'),
-                (completed_s, order['dest_location_id'] if not is_last else hub_loc_id, 'off_duty'),
+            worked_before = driver_hours_used[driver_id]
+            for t_s, loc_id, duty, worked_h in (
+                (assigned_at_s, prev_loc, 'on_duty_not_driving', worked_before),
+                (arr_pickup_s, order['pickup_location_id'], 'on_duty_not_driving', worked_before + dh_hours),
+                (dep_pickup_s, order['pickup_location_id'], 'driving', worked_before + dh_hours + pickup_dwell_h),
+                (arr_delivery_s, order['dest_location_id'], 'on_duty_not_driving', worked_before + dh_hours + pickup_dwell_h + order['loaded_hours']),
+                (completed_s, order['dest_location_id'] if not is_last else hub_loc_id, 'off_duty',
+                 worked_before + dh_hours + pickup_dwell_h + order['loaded_hours'] + this_delivery_dwell_h),
             ):
                 lat, lon = data.locations.get(loc_id, (None, None))
-                elapsed_h = t_s / 3600
                 driver_snapshot_rows.append((
                     str(run_id), driver_id, truck_number, str(trip_id), sim_start + timedelta(seconds=t_s),
                     lat, lon, duty,
-                    round(max(0.0, hos_drive_start - elapsed_h), 1), round(max(0.0, hos_duty_start - elapsed_h), 1),
+                    round(max(0.0, hos_drive_start - worked_h), 1), round(max(0.0, hos_duty_start - worked_h), 1),
                     None, None, None, None, None, True,
                 ))
 
