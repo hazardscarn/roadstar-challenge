@@ -1586,14 +1586,21 @@ def run_ai_dispatch_simulation(body: dict):
     sim with a full-day, multi-truck replay of what the AI (CP-SAT) dispatcher actually decided for
     one real day -- sim/live/ai_dispatch_replay.py. `service_date` (YYYY-MM-DD) must already have
     an AI-assigned (or manually dispatched) plan on the Dispatch Board."""
+    from sim.live.ai_dispatch_replay import DAY_START_HOUR as ai_dispatch_day_start_hour
     from sim.live.ai_dispatch_replay import generate as generate_ai_dispatch_replay
     service_date = date.fromisoformat(body["service_date"])
     try:
         result = generate_ai_dispatch_replay(service_date)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    # Real bug found directly: this hardcoded "T06:00:00" independently of ai_dispatch_replay.py's
+    # own DAY_START_HOUR constant -- the two silently drifted apart the moment that constant was
+    # corrected to 03:00 (real-data-grounded, see its own comment), which would have made every
+    # trip's displayed playback time 3 hours off from what the trips were actually generated
+    # against. Reading the same constant instead of a second hardcoded literal.
     return {
-        "run_id": result["run_id"], "seed": 0, "sim_start": f"{service_date.isoformat()}T06:00:00+00:00",
+        "run_id": result["run_id"], "seed": 0,
+        "sim_start": f"{service_date.isoformat()}T{ai_dispatch_day_start_hour:02d}:00:00+00:00",
         "duration_seconds": max((t["completed_at_s"] for t in result["trips"]), default=0),
         "summary": result["summary"], "fleet_metrics": None,
         "trips": [_ai_dispatch_trip_row_to_sim_trip((

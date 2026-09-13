@@ -92,10 +92,15 @@ from sim.engine.run_sim import get_route, load_sim_data
 # reporting. Not a workaround for a bug -- this is CP-SAT's documented native representation.
 SCALE = 100
 
-DAY_START_HOUR = 6  # SYNTHESIZED assumption: a truck realistically leaves its home hub around 06:00
-# local on a normal operating day -- used only to estimate whether a truck can reach an order's
-# pickup ON TIME from its home hub. Same role ASSUMED_PROMISE_BUFFER_HOURS plays elsewhere in this
-# project: a labeled, reasonable business assumption, not something derived from data.
+DAY_START_HOUR = 3  # Real user correction, checked directly against ground_truth.historical_legs'
+# actual_pickup hours: a fixed 06:00 earliest-departure assumption was structurally blocking any
+# early pickup from ever being feasible (with the 30-min hard lateness cutoff, a 06:10 pickup is
+# unreachable from ANY real distance if no truck may leave before 06:00) -- but 7.6% of real
+# historical pickups happen before 06:00, almost all of it (7.3 of those 7.6 points) in the
+# 03:00-06:00 window specifically (only 0.2% before 03:00, negligible). 03:00 is therefore a real,
+# data-grounded earliest-possible departure floor, not another arbitrary guess -- it doesn't force
+# every truck to leave that early, it just stops the solver from hard-blocking a pickup that a real
+# truck could have realistically made.
 HOS_TIE_BREAK_WEIGHT = 0.10  # CAD-equivalent per hour of a driver's OWN remaining HOS margin --
 # deliberately tiny relative to real order revenue (hundreds of CAD) so this only breaks ties
 # between otherwise-equal placements (prefer the better-rested driver), never overrides economics.

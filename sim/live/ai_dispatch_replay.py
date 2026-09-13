@@ -51,7 +51,9 @@ from sim.dispatch_solver import dwell_hours_per_order
 from sim.engine.route_interpolation import get_route_geometry, interpolate_position, route_distance_km
 from sim.engine.run_sim import load_sim_data
 
-DAY_START_HOUR = 6  # matches sim/dispatch_solver.py's own labeled assumption
+DAY_START_HOUR = 3  # matches sim/dispatch_solver.py's own real-data-grounded assumption (real user
+# correction: checked directly, 7.6% of real historical pickups happen before 06:00, almost all of
+# it in the 03:00-06:00 window -- a fixed 06:00 floor was structurally blocking early pickups)
 DETENTION_RATE_PER_HR_CAD = 75.0  # matches sim/sql/044's own coalesce() fallback
 AVG_HIGHWAY_SPEED_KMH = 95.0
 AVG_CITY_SPEED_KMH = 40.0

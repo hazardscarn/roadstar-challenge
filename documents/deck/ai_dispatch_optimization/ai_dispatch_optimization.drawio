@@ -1,0 +1,470 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+
+  <diagram name="1 Problem Framing" id="p1">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1160" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="t1" value="AI Assign: Day-Ahead Truck x Order x Driver Optimization (Google OR-Tools CP-SAT)" style="text;html=1;whiteSpace=wrap;fontSize=20;fontStyle=1;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t1s" value="Replaces one-quote-at-a-time scoring and pure manual drag-and-drop with a single batch solve over the WHOLE day's order book at once" style="text;html=1;whiteSpace=wrap;fontSize=13;fontFamily=Trebuchet MS;align=center;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="1080" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="in1" value="Trucks &amp; Trailers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Trebuchet MS;fontStyle=1;fontSize=14;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="320" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="in1b" value="truck_number, truck_type&#10;capacity_lbs / capacity_pallets&#10;home hub (Milton or London)&#10;" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=left;" vertex="1" parent="1">
+          <mxGeometry x="80" y="152" width="280" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="in2" value="Order Book (the day's real freight)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Trebuchet MS;fontStyle=1;fontSize=14;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="420" y="120" width="320" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="in2b" value="pickup / dest location, weight, pallets&#10;load_type, pickup_at (scheduled time)&#10;rate (real linehaul $), loaded_miles/hours" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=left;" vertex="1" parent="1">
+          <mxGeometry x="440" y="152" width="280" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="in3" value="Drivers &amp; HOS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Trebuchet MS;fontStyle=1;fontSize=14;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="780" y="120" width="320" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="in3b" value="home hub, driver_id&#10;4 real HOS clocks remaining:&#10;driving / duty / 7-day cycle / 14-day cycle" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=left;" vertex="1" parent="1">
+          <mxGeometry x="800" y="152" width="280" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="a1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontFamily=Trebuchet MS;" edge="1" parent="1" source="in1" target="solver">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontFamily=Trebuchet MS;" edge="1" parent="1" source="in2" target="solver">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontFamily=Trebuchet MS;" edge="1" parent="1" source="in3" target="solver">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="solver" value="CP-SAT SOLVER&#10;&#10;Generalized Assignment Problem + Sequencing&#10;&#10;X[t,o] - order o rides truck t&#10;Y[t,d] - driver d drives truck t&#10;Next[t,i,j] - order j immediately follows order i on truck t&#10;&#10;maximize: total real net revenue, subject to hard feasibility constraints" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontFamily=Trebuchet MS;fontStyle=1;fontSize=14;verticalAlign=middle;align=center;" vertex="1" parent="1">
+          <mxGeometry x="330" y="330" width="500" height="180" as="geometry" />
+        </mxCell>
+
+        <mxCell id="note1" value="Solved via Google OR-Tools CP-SAT -- constraint programming / SAT search,&#10;NOT machine learning. Every day's solve is independent and provably&#10;bounded: OPTIMAL, or FEASIBLE with a measured optimality gap (typically &lt; 2%)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Trebuchet MS;fontSize=11;align=left;spacingLeft=10;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="860" y="330" width="260" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="a4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontFamily=Trebuchet MS;" edge="1" parent="1" source="solver" target="out1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="out1" value="OPTIMAL DAY PLAN&#10;&#10;Which truck carries which orders, IN WHAT ORDER (a real chained route, not just a set) - which driver drives which truck - projected revenue, deadhead miles, and lateness for the whole day" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontFamily=Trebuchet MS;fontStyle=1;fontSize=14;verticalAlign=middle;align=center;" vertex="1" parent="1">
+          <mxGeometry x="330" y="580" width="500" height="140" as="geometry" />
+        </mxCell>
+
+        <mxCell id="foot" value="See pages 2-4 for exactly what the solver optimizes and how the sequencing (chaining) mechanism works; pages 5-6 for real backtest results." style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontColor=#666666;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="760" width="1080" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="2 Objective Function" id="p2">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1160" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="t2" value="What The Solver Optimizes: The Objective Function" style="text;html=1;whiteSpace=wrap;fontSize=20;fontStyle=1;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="formula" value="maximize:  Sum over every assigned order of (order_revenue - deadhead_cost - lateness_penalty)&#10;                + tiny HOS tie-break bonus&#10;                - HUGE penalty x every order left unassigned" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Courier New;fontSize=14;align=left;spacingLeft=14;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="80" width="1000" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b1" value="order_revenue" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Trebuchet MS;fontStyle=1;fontSize=13;verticalAlign=top;spacingTop=6;align=center;" vertex="1" parent="1">
+          <mxGeometry x="60" y="210" width="330" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="b1b" value="The real linehaul rate for this order&#10;(order.rate) - earned in full the&#10;moment a truck is assigned, regardless&#10;of how it's sequenced." style="text;html=1;whiteSpace=wrap;fontSize=11;fontFamily=Trebuchet MS;align=left;" vertex="1" parent="1">
+          <mxGeometry x="75" y="245" width="300" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b2" value="deadhead_cost" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Trebuchet MS;fontStyle=1;fontSize=13;verticalAlign=top;spacingTop=6;align=center;" vertex="1" parent="1">
+          <mxGeometry x="415" y="210" width="330" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="b2b" value="Empty miles x $1.75/mile (real operating&#10;cost). Hub-&gt;pickup by default, replaced&#10;by the (usually cheaper) prior-dropoff-&#10;&gt;pickup leg when chained (page 4).&#10;Includes the end-of-day return to hub." style="text;html=1;whiteSpace=wrap;fontSize=11;fontFamily=Trebuchet MS;align=left;" vertex="1" parent="1">
+          <mxGeometry x="430" y="245" width="300" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b3" value="lateness_penalty" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Trebuchet MS;fontStyle=1;fontSize=13;verticalAlign=top;spacingTop=6;align=center;" vertex="1" parent="1">
+          <mxGeometry x="770" y="210" width="330" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="b3b" value="$40 x (hours_late ^ 1.5) - convex, same&#10;curve used everywhere else in this&#10;project. First-leg (from hub) OR&#10;chain-leg (from prior dropoff) - hard&#10;cut at 30 min for BOTH (page 3)." style="text;html=1;whiteSpace=wrap;fontSize=11;fontFamily=Trebuchet MS;align=left;" vertex="1" parent="1">
+          <mxGeometry x="785" y="245" width="300" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b4" value="unassigned_penalty  --  &quot;never lose an order&quot;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontFamily=Trebuchet MS;fontStyle=1;fontSize=14;verticalAlign=top;spacingTop=6;align=center;" vertex="1" parent="1">
+          <mxGeometry x="60" y="380" width="1040" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="b4b" value="2 x (sum of every order's rate that day), charged per order left unassigned. Deliberately dominant: strictly bigger than every order's revenue combined, so the solver can never come out ahead by dropping even the single highest-value order. This is the real business requirement ('we can never lose an order if it can be avoided') expressed as a hard-dominating cost, not a hopeful weight." style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1">
+          <mxGeometry x="90" y="420" width="980" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b5" value="HOS_tie_break_bonus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Trebuchet MS;fontStyle=1;fontSize=13;verticalAlign=top;spacingTop=6;align=center;" vertex="1" parent="1">
+          <mxGeometry x="60" y="530" width="510" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="b5b" value="+$0.10 CAD per hour of a driver's OWN remaining HOS margin. Deliberately tiny relative to real order revenue (hundreds of CAD) -- only breaks ties between otherwise-equal placements (prefer the better-rested driver), never overrides real economics." style="text;html=1;whiteSpace=wrap;fontSize=11;fontFamily=Trebuchet MS;align=left;" vertex="1" parent="1">
+          <mxGeometry x="80" y="565" width="470" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b6" value="Deliberately NOT included (removed)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Trebuchet MS;fontStyle=1;fontSize=13;verticalAlign=top;spacingTop=6;align=center;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="590" y="530" width="510" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="b6b" value="maintenance_risk_penalty -- entirely SYNTHESIZED breakdown-risk signal, no real data behind it. home_progress_bonus / cycle_end_stranding_penalty -- RL-era potential-based reward shaping; only makes sense for a policy learning over repeated trials, not a one-shot deterministic solve (already inert here -- these need args this solver never passes)." style="text;html=1;whiteSpace=wrap;fontSize=11;fontFamily=Trebuchet MS;align=left;" vertex="1" parent="1">
+          <mxGeometry x="610" y="565" width="470" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="src" value="Every dollar figure reuses sim/engine/reward.py's already-tuned real economics (linehaul rate, $1.75/mi operating cost, the lateness curve) -- the CP-SAT model decides WHICH structure of assignments to pick, it doesn't reinvent how good any one assignment is." style="text;html=1;whiteSpace=wrap;fontSize=11;fontFamily=Trebuchet MS;align=center;fontColor=#666666;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="60" y="670" width="1040" height="50" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="3 Constraints" id="p3">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1160" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="t3" value="Hard Constraints vs. Soft (Priced-In) Costs" style="text;html=1;whiteSpace=wrap;fontSize=20;fontStyle=1;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t3s" value="A hard constraint makes an option not exist to the solver at all. A soft cost makes an option more expensive, but never impossible." style="text;html=1;whiteSpace=wrap;fontSize=13;fontFamily=Trebuchet MS;align=center;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="1080" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="hardHdr" value="HARD CONSTRAINTS  (must hold, or the option is never offered)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Trebuchet MS;fontStyle=1;fontSize=15;align=center;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="500" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="h1" value="Equipment &amp; capacity match&#10;truck_type == order.load_type; order&#10;weight/pallets individually &lt;= truck&#10;capacity (checked PER ORDER, not&#10;summed across the day -- sequencing&#10;means orders don't overlap in time)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5fff5;strokeColor=#82b366;fontFamily=Trebuchet MS;fontSize=11;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="165" width="500" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="h2" value="One truck per driver, one driver per truck&#10;Y[t,d] sums to &lt;= 1 across both dimensions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5fff5;strokeColor=#82b366;fontFamily=Trebuchet MS;fontSize=11;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="280" width="500" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="h3" value="Real 4-clock HOS budget&#10;driving / on-duty / 7-day cycle / 14-day&#10;cycle. Now includes REAL deadhead hours&#10;(hub-to-pickup or chained) AND the&#10;end-of-day return -- not just loaded&#10;hours (a real gap this fix closed:&#10;a driver's clock used to be undercounted)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5fff5;strokeColor=#82b366;fontFamily=Trebuchet MS;fontSize=11;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="365" width="500" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="h4" value="First-leg &amp; chain HARD cutoff (30 min)&#10;A truck may only take an order -- its&#10;first pickup of the day (from hub), or&#10;a Next[t,i,j] chain link (from a prior&#10;dropoff) -- if it can physically arrive&#10;within 30 min of schedule. Beyond that:&#10;a different truck must take it, or it&#10;goes unassigned." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5fff5;strokeColor=#82b366;fontFamily=Trebuchet MS;fontSize=11;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="505" width="500" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="h5" value="Chains are a DAG -- no subtours possible&#10;Next[t,i,j] only exists for orders in real&#10;chronological order (i before j). Each&#10;order gets &lt;= 1 predecessor, &lt;= 1&#10;successor per truck. Time can't loop&#10;back, so no subtour-elimination&#10;constraint is needed (unlike general&#10;vehicle routing)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5fff5;strokeColor=#82b366;fontFamily=Trebuchet MS;fontSize=11;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="655" width="500" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="softHdr" value="SOFT COSTS  (priced into the objective, never blocked outright)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Trebuchet MS;fontStyle=1;fontSize=15;align=center;" vertex="1" parent="1">
+          <mxGeometry x="600" y="110" width="500" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s1" value="First-leg lateness (within the 30-min grace)&#10;Assumes the earliest a truck may leave&#10;its home hub is 03:00 local -- checked&#10;directly against real historical pickup&#10;times, not a guess (7.6% of real&#10;pickups happen before 06:00). Penalized&#10;($40 x hours_late^1.5) up to the hard&#10;cutoff at left; beyond it, blocked." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8f0;strokeColor=#d79b00;fontFamily=Trebuchet MS;fontSize=11;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="600" y="165" width="500" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s2" value="Chain-leg lateness (within the 30-min grace)&#10;Same $40 x hours_late^1.5 curve, computed&#10;from the truck's REAL previous stop&#10;(prior dropoff + real dwell + real OSRM&#10;drive time), not the hub -- so a chain&#10;that's technically feasible but cutting&#10;it close still loses real revenue." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8f0;strokeColor=#d79b00;fontFamily=Trebuchet MS;fontSize=11;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="600" y="300" width="500" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s3" value="Deadhead cost (all empty miles)&#10;$1.75/mile x every empty mile -- hub to&#10;first pickup, chained dropoff-to-pickup&#10;legs, and the end-of-day return to hub.&#10;Real, but never blocks an assignment by&#10;itself -- the solver just prefers cheaper&#10;routing when it exists." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8f0;strokeColor=#d79b00;fontFamily=Trebuchet MS;fontSize=11;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="600" y="435" width="500" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s4" value="Real dwell (loading/unloading) time&#10;~1.0h combined median (calibration.&#10;dwell_time_dist -- real fleet timestamps,&#10;~36min pickup + ~25.5min delivery),&#10;consumed between a chain's legs and&#10;charged against real HOS duty hours." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8f0;strokeColor=#d79b00;fontFamily=Trebuchet MS;fontSize=11;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="600" y="570" width="500" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="footc" value="Real numbers used above (dwell time, $1.75/mi, HOS clock limits) are either real Canadian HOS regulation, a real calibrated fleet statistic, or a labeled business assumption -- see the deck README for exactly which is which." style="text;html=1;whiteSpace=wrap;fontSize=11;fontFamily=Trebuchet MS;align=center;fontColor=#666666;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="60" y="800" width="1040" height="40" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="4 Sequencing Fix" id="p4">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1160" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="t4" value="The Sequencing Fix: Why Chaining Orders Matters" style="text;html=1;whiteSpace=wrap;fontSize=20;fontStyle=1;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="beforeHdr" value="BEFORE -- pure assignment, no sequencing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontFamily=Trebuchet MS;fontStyle=1;fontSize=14;align=center;" vertex="1" parent="1">
+          <mxGeometry x="60" y="80" width="1110" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="beforeTxt" value="Every order priced as if the truck departs FRESH FROM THE HUB, even the 2nd, 3rd order of the same truck's day" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="60" y="118" width="1110" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="hub1" value="HUB" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Trebuchet MS;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="60" y="165" width="70" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="o1a" value="Order 1&#10;pickup -&gt; dropoff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Trebuchet MS;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="280" y="170" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="hub1b" value="HUB" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Trebuchet MS;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="580" y="165" width="70" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="o2a" value="Order 2&#10;pickup -&gt; dropoff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Trebuchet MS;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="800" y="170" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="hub1c" value="HUB" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Trebuchet MS;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="165" width="70" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="html=1;fontFamily=Trebuchet MS;fontSize=11;endArrow=block;" edge="1" parent="1" source="hub1" target="o1a">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="phantom: back to hub" style="html=1;fontFamily=Trebuchet MS;fontSize=10;endArrow=block;dashed=1;strokeColor=#b85450;fontColor=#b85450;" edge="1" parent="1" source="o1a" target="hub1b">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="0" y="-14" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="phantom: out again" style="html=1;fontFamily=Trebuchet MS;fontSize=10;endArrow=block;dashed=1;strokeColor=#b85450;fontColor=#b85450;" edge="1" parent="1" source="hub1b" target="o2a">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="0" y="-14" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" style="html=1;fontFamily=Trebuchet MS;fontSize=11;endArrow=block;" edge="1" parent="1" source="o2a" target="hub1c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="beforeBox" value="Real bug found on 2026-07-14 (Mode B, full 42-driver pool): 38 of 42 available trucks got activated, and 25 of those carried only ONE order each -- the solver spread work thin instead of chaining, because a 2nd order looked artificially expensive. Directly measured: one truck's real 2nd order was priced at 113.8mi of phantom deadhead when the TRUE cost of going straight from the 1st order's dropoff was only 38.8mi." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff5f5;strokeColor=#b85450;fontFamily=Trebuchet MS;fontSize=12;align=left;spacingLeft=10;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="270" width="1110" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="afterHdr" value="AFTER -- Next[t,i,j] chain-sequencing variables" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Trebuchet MS;fontStyle=1;fontSize=14;align=center;" vertex="1" parent="1">
+          <mxGeometry x="60" y="400" width="1110" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="afterTxt" value="Order 2 starts from where the truck actually IS -- its previous dropoff -- not the hub" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="60" y="438" width="1110" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="hub2" value="HUB" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Trebuchet MS;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="60" y="485" width="70" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="o1b" value="Order 1&#10;pickup -&gt; dropoff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Trebuchet MS;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="280" y="490" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="o2b" value="Order 2&#10;pickup -&gt; dropoff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Trebuchet MS;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="580" y="490" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="o3b" value="Order 3&#10;pickup -&gt; dropoff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Trebuchet MS;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="880" y="490" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="hub2b" value="HUB" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Trebuchet MS;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="485" width="70" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f1" value="hub-&gt;pickup" style="html=1;fontFamily=Trebuchet MS;fontSize=10;endArrow=block;" edge="1" parent="1" source="hub2" target="o1b">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="0" y="-14" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f2" value="Next[1,2]: dropoff-&gt;pickup&#10;(the REAL, short leg)" style="html=1;fontFamily=Trebuchet MS;fontSize=10;endArrow=block;strokeColor=#82b366;fontColor=#2d5a2d;" edge="1" parent="1" source="o1b" target="o2b">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="0" y="-14" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f3" value="Next[2,3]" style="html=1;fontFamily=Trebuchet MS;fontSize=10;endArrow=block;strokeColor=#82b366;fontColor=#2d5a2d;" edge="1" parent="1" source="o2b" target="o3b">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="0" y="-14" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f4" value="end-of-day return" style="html=1;fontFamily=Trebuchet MS;fontSize=10;endArrow=block;" edge="1" parent="1" source="o3b" target="hub2b">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="0" y="-14" as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="afterBox" value="Objective substitution, per order o on truck t: pickup-leg cost = hub cost by default, replaced by the (usually much cheaper) prior-dropoff-&gt;pickup cost whenever Next[t,i,o]=1 is chosen. End-of-day return cost is WAIVED for any order that has a successor -- it belongs to whichever order actually ends up last. Because Next[t,i,j] only ever connects orders in real chronological order (i's pickup before j's), the chain graph is a DAG by construction: no subtour-elimination is needed, unlike general vehicle routing." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5fff5;strokeColor=#82b366;fontFamily=Trebuchet MS;fontSize=12;align=left;spacingLeft=10;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="590" width="1110" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="resultBox" value="Measured effect of this ONE fix, same real day (2026-07-14, Mode B): trucks used dropped 38 -&gt; 22-24, single-order trucks dropped 25 -&gt; 2-5, net revenue on that day rose from $5,800 to $8,375 (+44%), deadhead fell from 3,920mi to 2,568mi (-34%) -- while assigning MORE orders (65 -&gt; 74), not fewer." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#d6b656;fontFamily=Trebuchet MS;fontSize=13;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="720" width="1110" height="90" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="5 Backtest Methodology" id="p5">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1160" pageHeight="1050" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="t5" value="Backtesting: REAL vs. AI, Apples-to-Apples" style="text;html=1;whiteSpace=wrap;fontSize=20;fontStyle=1;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t5s" value="46 real days, July-August 2026 -- the same real South-Ontario order book replayed against 3 different dispatch strategies" style="text;html=1;whiteSpace=wrap;fontSize=13;fontFamily=Trebuchet MS;align=center;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="1080" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c1" value="REAL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Trebuchet MS;fontStyle=1;fontSize=15;verticalAlign=top;spacingTop=8;align=center;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="330" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="c1b" value="What actually happened: the real&#10;dispatcher's own choices, real&#10;pickup/delivery timestamps.&#10;&#10;Ground truth -- no feasibility check&#10;needed (whatever really happened&#10;was, by definition, feasible)." style="text;html=1;whiteSpace=wrap;fontSize=11;fontFamily=Trebuchet MS;align=left;" vertex="1" parent="1">
+          <mxGeometry x="80" y="150" width="290" height="150" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c2" value="AI -- Mode A (stress test)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Trebuchet MS;fontStyle=1;fontSize=15;verticalAlign=top;spacingTop=8;align=center;" vertex="1" parent="1">
+          <mxGeometry x="415" y="110" width="330" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="c2b" value="Deliberately handicapped: restricted&#10;to ONLY the drivers REAL happened&#10;to use that day (as few as 5 for&#10;15 orders). Shows AI still holds up&#10;even inside REAL's own constraints&#10;-- not how the system is deployed." style="text;html=1;whiteSpace=wrap;fontSize=11;fontFamily=Trebuchet MS;align=left;" vertex="1" parent="1">
+          <mxGeometry x="435" y="150" width="290" height="150" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c3" value="AI -- Mode B (deployed configuration)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontFamily=Trebuchet MS;fontStyle=1;fontSize=15;verticalAlign=top;spacingTop=8;align=center;" vertex="1" parent="1">
+          <mxGeometry x="770" y="110" width="330" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="c3b" value="All 42 real South-Ontario drivers&#10;available every day -- exactly how&#10;the system actually runs in&#10;production. This is the real&#10;comparison: REAL vs. what AI&#10;dispatch achieves with the fleet&#10;as it stands." style="text;html=1;whiteSpace=wrap;fontSize=11;fontFamily=Trebuchet MS;align=left;" vertex="1" parent="1">
+          <mxGeometry x="790" y="150" width="290" height="150" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fairHdr" value="Fairness corrections made (an iterative, honestly-disclosed process)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Trebuchet MS;fontStyle=1;fontSize=14;align=center;" vertex="1" parent="1">
+          <mxGeometry x="60" y="345" width="1040" height="35" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fx1" value="1. Fleet scope&#10;Only the real ~42 South-Ontario&#10;drivers/trucks -- not the full&#10;131-truck company-wide roster&#10;(which includes non-Ontario routes)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9f9f9;strokeColor=#999999;fontFamily=Trebuchet MS;fontSize=10;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="395" width="335" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="fx2" value="2. Real hubs only&#10;Barrie is a hub built for the live/&#10;forward system, never real&#10;historically. All 42 drivers&#10;re-homed to Milton/London only,&#10;via nearest-real-anchor from&#10;actual historical leg origins." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9f9f9;strokeColor=#999999;fontFamily=Trebuchet MS;fontSize=10;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="410" y="395" width="335" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="fx3" value="3. Clean HOS start, simulated forward&#10;Every driver starts at the full legal&#10;limit on day 1, then a rolling&#10;HosTracker carries forward real&#10;7-day/14-day cycle usage,&#10;sequential day by day." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9f9f9;strokeColor=#999999;fontFamily=Trebuchet MS;fontSize=10;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="760" y="395" width="340" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fx4" value="4. Symmetric deadhead accounting&#10;Hub-&gt;first pickup + chained legs +&#10;end-of-day return-to-hub -- the&#10;IDENTICAL definition applied to&#10;BOTH REAL and AI, not two&#10;different yardsticks." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9f9f9;strokeColor=#999999;fontFamily=Trebuchet MS;fontSize=10;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="505" width="335" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="fx5" value="5. Matched driver pools&#10;REAL's own reported numbers are&#10;restricted to the same driver pool&#10;AI is restricted to -- can't credit&#10;REAL with 42 drivers while capping&#10;AI at fewer and call it fair." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9f9f9;strokeColor=#999999;fontFamily=Trebuchet MS;fontSize=10;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="410" y="505" width="335" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="fx6" value="6. Order-identity bug&#10;A real bill_number can legitimately&#10;repeat (split/multi-leg shipments) --&#10;fixed a phantom-duplicate counting&#10;bug that could inflate &quot;orders&#10;assigned&quot; past 100% of the day's book." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9f9f9;strokeColor=#999999;fontFamily=Trebuchet MS;fontSize=10;align=left;spacingLeft=8;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="760" y="505" width="340" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="objMatch" value="Objective / reporting match: the solver's own internal objective and the post-solve reported numbers were made to agree exactly (both now walk the SAME solved Next[] chain), closing a real reward-hacking-style bug where a &quot;provably optimal&quot; solve could still score worse than REAL because the objective silently omitted a real cost the reporting charged." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff5f5;strokeColor=#b85450;fontFamily=Trebuchet MS;fontSize=11;align=center;verticalAlign=middle;spacingLeft=10;spacingRight=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="630" width="1040" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dwellNote" value="Real dwell time used throughout: calibration.dwell_time_dist (this fleet's own real historical timestamps) -- ~36min median pickup dwell + ~25.5min median delivery dwell -- not a guessed constant, and independently consistent with this project's own Project Brief 2h detention-free-time assumption and real industry benchmarks (ATRI, FreightWaves, DOT)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5ff;strokeColor=#9673a6;fontFamily=Trebuchet MS;fontSize=11;align=center;verticalAlign=middle;spacingLeft=10;spacingRight=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="730" width="1040" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fin" value="Each of REAL / Mode A / Mode B is scored on identical real economics -- same order book, same rate table, same $1.75/mi operating cost, same lateness curve, same deadhead definition. The only thing that differs is WHO gets to make the assignment decision." style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontStyle=2;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="60" y="830" width="1040" height="50" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="6 Backtest Results" id="p6">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageWidth="1160" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="t6" value="Backtest Results: 46 Real Days, July-August 2026" style="text;html=1;whiteSpace=wrap;fontSize=20;fontStyle=1;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t6s" value="Same real order book, same real 42-driver / 2-hub roster -- REAL dispatcher vs. AI/CP-SAT" style="text;html=1;whiteSpace=wrap;fontSize=13;fontFamily=Trebuchet MS;align=center;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="1080" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="tbl" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="1040" height="280" as="geometry" />
+        </mxCell>
+
+        <mxCell id="colHdr0" value="Metric" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;fontStyle=1;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="310" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="colHdr1" value="REAL" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;fontStyle=1;align=center;fontColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="370" y="110" width="220" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="colHdr2" value="AI - Mode A" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;fontStyle=1;align=center;fontColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="590" y="110" width="220" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="colHdr3" value="AI - Mode B" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;fontStyle=1;align=center;fontColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="810" y="110" width="260" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="hline0" style="endArrow=none;html=1;strokeColor=#666666;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="60" y="147" as="sourcePoint" />
+            <mxPoint x="1100" y="147" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="r1c0" value="Orders served" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=left;spacingLeft=10;" vertex="1" parent="1"><mxGeometry x="60" y="152" width="310" height="30" as="geometry" /></mxCell>
+        <mxCell id="r1c1" value="1,659" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1"><mxGeometry x="370" y="152" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r1c2" value="1,414" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1"><mxGeometry x="590" y="152" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r1c3" value="1,671" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="810" y="152" width="260" height="30" as="geometry" /></mxCell>
+
+        <mxCell id="r2c0" value="Orders missed" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=left;spacingLeft=10;" vertex="1" parent="1"><mxGeometry x="60" y="182" width="310" height="30" as="geometry" /></mxCell>
+        <mxCell id="r2c1" value="128" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1"><mxGeometry x="370" y="182" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r2c2" value="373" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1"><mxGeometry x="590" y="182" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r2c3" value="116" style="text;html=1;whiteSpace=wrap;fontFamily=Trebuchet MS;fontSize=12;align=center;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="810" y="182" width="260" height="30" as="geometry" /></mxCell>
+
+        <mxCell id="r3c0" value="Service rate" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=left;spacingLeft=10;" vertex="1" parent="1"><mxGeometry x="60" y="212" width="310" height="30" as="geometry" /></mxCell>
+        <mxCell id="r3c1" value="92.8%" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1"><mxGeometry x="370" y="212" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r3c2" value="79.1%" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1"><mxGeometry x="590" y="212" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r3c3" value="93.5%" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="810" y="212" width="260" height="30" as="geometry" /></mxCell>
+
+        <mxCell id="r4c0" value="Total net revenue (CAD)" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="60" y="242" width="310" height="30" as="geometry" /></mxCell>
+        <mxCell id="r4c1" value="$117,783" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1"><mxGeometry x="370" y="242" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r4c2" value="$123,901" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="590" y="242" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r4c3" value="$140,521" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontStyle=1;fontColor=#2d5a2d;" vertex="1" parent="1"><mxGeometry x="810" y="242" width="260" height="30" as="geometry" /></mxCell>
+
+        <mxCell id="r5c0" value="Total deadhead miles" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=left;spacingLeft=10;" vertex="1" parent="1"><mxGeometry x="60" y="272" width="310" height="30" as="geometry" /></mxCell>
+        <mxCell id="r5c1" value="63,528" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1"><mxGeometry x="370" y="272" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r5c2" value="45,390" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontStyle=1;fontColor=#2d5a2d;" vertex="1" parent="1"><mxGeometry x="590" y="272" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r5c3" value="49,957" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontStyle=1;fontColor=#2d5a2d;" vertex="1" parent="1"><mxGeometry x="810" y="272" width="260" height="30" as="geometry" /></mxCell>
+
+        <mxCell id="r6c0" value="Avg net revenue / day (CAD)" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=left;spacingLeft=10;" vertex="1" parent="1"><mxGeometry x="60" y="302" width="310" height="30" as="geometry" /></mxCell>
+        <mxCell id="r6c1" value="$2,561" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1"><mxGeometry x="370" y="302" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r6c2" value="$2,693" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;" vertex="1" parent="1"><mxGeometry x="590" y="302" width="220" height="30" as="geometry" /></mxCell>
+        <mxCell id="r6c3" value="$3,055" style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="810" y="302" width="260" height="30" as="geometry" /></mxCell>
+
+        <mxCell id="vline1" style="endArrow=none;html=1;strokeColor=#dddddd;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="370" y="110" as="sourcePoint" /><mxPoint x="370" y="390" as="targetPoint" /></mxGeometry></mxCell>
+        <mxCell id="vline2" style="endArrow=none;html=1;strokeColor=#dddddd;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="590" y="110" as="sourcePoint" /><mxPoint x="590" y="390" as="targetPoint" /></mxGeometry></mxCell>
+        <mxCell id="vline3" style="endArrow=none;html=1;strokeColor=#dddddd;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="810" y="110" as="sourcePoint" /><mxPoint x="810" y="390" as="targetPoint" /></mxGeometry></mxCell>
+
+        <mxCell id="stat1" value="+19%&#10;net revenue&#10;(Mode B vs. REAL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Trebuchet MS;fontStyle=1;fontSize=16;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="430" width="250" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="stat2" value="-21%&#10;deadhead miles&#10;(Mode B vs. REAL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Trebuchet MS;fontStyle=1;fontSize=16;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="330" y="430" width="250" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="stat3" value="92.8% -&gt; 93.5%&#10;service rate&#10;(REAL -&gt; Mode B)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Trebuchet MS;fontStyle=1;fontSize=16;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="600" y="430" width="250" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="stat4" value="EVERY metric&#10;wins simultaneously&#10;-- no tradeoff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#d6b656;fontFamily=Trebuchet MS;fontStyle=1;fontSize=16;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="870" y="430" width="230" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="note6" value="Rerun 2026-09-13 after two real, disclosed fixes: a hard block on overlapping-truck schedules and multi-hour-late chains (closes a correctness bug), then a real-data-grounded correction to the assumed earliest truck departure time (03:00, not 06:00 -- 7.6% of real historical pickups happen before 06:00). Full daily-level detail is in weekly_facet.png, monthly_facet.png, overall_summary.png (documents/results/dispatch_solver_backtest/) -- real matplotlib output from the actual 46-day run, not illustrative." style="text;html=1;whiteSpace=wrap;fontSize=12;fontFamily=Trebuchet MS;align=center;fontColor=#666666;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="60" y="600" width="1040" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+</mxfile>
