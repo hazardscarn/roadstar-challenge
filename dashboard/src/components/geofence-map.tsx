@@ -1,6 +1,15 @@
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-draw/dist/leaflet.draw.css'
 import * as L from 'leaflet'
+// Real crash found and fixed directly (browser console, production build only: "Cannot read
+// properties of undefined (reading 'Event')" thrown from inside this file's own DrawControl,
+// at `L.Draw.Event.CREATED` -- reproduced on multiple browsers, not touch-specific, so the
+// touchleave/touchExtend fix above was a real but SEPARATE bug, not this one). leaflet-draw is a
+// legacy UMD package whose fallback path mutates a global `L` it expects to find -- see
+// lib/leaflet-window-bridge.ts for exactly why this has to be a SEPARATE imported module rather
+// than an inline statement here (a first attempt at that inline version was verified, against the
+// real built bundle, to run 100,000+ characters too late to matter -- import hoisting).
+import '@/lib/leaflet-window-bridge'
 import 'leaflet-draw'
 import { AlertTriangle, PenLine, Satellite, Undo2 } from 'lucide-react'
 import * as React from 'react'
