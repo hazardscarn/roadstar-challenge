@@ -9,6 +9,8 @@ export interface SimTrip {
   quote_id: string
   driver_id: number
   truck_number: string
+  hub_city?: string | null
+  is_detention_demo?: boolean
   reload_immediate: boolean
   deadhead_saved: number
   assigned_at_s: number
@@ -32,7 +34,8 @@ export interface SimTrip {
   had_breakdown: boolean
   detention_amount: number
   invoice_total: number
-  trajectory: [number, number, number][] // [t_offset_seconds, lat, lon]
+  // [t_offset_seconds, lat, lon] for every run; AI-dispatch-day runs add [speed_mph, fuel_pct].
+  trajectory: [number, number, number, number?, number?][]
 }
 
 export interface SimulationRunSummary {
@@ -40,22 +43,33 @@ export interface SimulationRunSummary {
   n_completed: number
   n_unassigned: number
   n_decisions: number
-  dispatcher_hours_saved: number
-  lost_opportunity_revenue: number
   total_revenue: number
-  n_deadhead_avoided: number
-  deadhead_avoided_value: number
   total_deadhead_cost: number
-  total_lateness_penalty: number
   net_margin: number
   total_detention_billed: number
-  total_invoiced: number
-  n_breakdowns: number
-  n_on_time: number
-  n_late: number
-  value_vs_baseline: number
-  baseline_n_completed: number
-  baseline_net_margin: number
+  // Real bug found directly: these were typed as always-present, but the AI-dispatch-day summary
+  // (sim/live/ai_dispatch_replay.py, the only run type any page still generates -- runWeekSimulation
+  // below is unused dead code) never sends them. SimulationShowcase.tsx's own "finished" summary
+  // panel accessed several of these unconditionally and crashed the whole page (blank screen) the
+  // instant a run finished or a past run loaded. Marked optional so any future access is forced to
+  // null-check, rather than silently compiling into the same crash again.
+  dispatcher_hours_saved?: number
+  lost_opportunity_revenue?: number
+  n_deadhead_avoided?: number
+  deadhead_avoided_value?: number
+  total_lateness_penalty?: number
+  total_invoiced?: number
+  n_breakdowns?: number
+  n_on_time?: number
+  n_late?: number
+  value_vs_baseline?: number
+  baseline_n_completed?: number
+  baseline_net_margin?: number
+  // AI-dispatch-day runs only (sim/live/ai_dispatch_replay.py) -- undefined on old week-batch runs.
+  n_drivers_used?: number
+  avg_hos_remaining_at_start?: number
+  avg_driver_hours_used?: number
+  total_deadhead_miles?: number
 }
 
 // Real user feedback: the showcase only ever showed a handful of averages next to the map --
@@ -129,6 +143,44 @@ export async function runWeekSimulation(seed?: number): Promise<SimulationRunRes
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(seed != null ? { seed } : {}),
   })
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+  return res.json()
+}
+
+// Real user ask: replace the week-long trained-model batch replay above with a full-day,
+// multi-truck replay of what the AI (CP-SAT) dispatcher actually decided for one real day
+// (sim/live/ai_dispatch_replay.py) -- same SimulationRunResult/SimTrip shape, so the playback
+// engine (positionAt/buildTimeline/the whole map+timeline UI) needs no changes to show it.
+export interface AiDispatchRunListItem {
+  run_id: string
+  service_date: string
+  created_at: string
+  n_orders_generated: number
+  n_completed: number
+  n_unassigned: number
+  total_revenue: number
+  net_margin: number
+  total_detention_billed: number
+}
+
+export async function runAiDispatchSimulation(serviceDate: string): Promise<SimulationRunResult> {
+  const res = await fetch('/api/simulation/ai-dispatch-run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ service_date: serviceDate }),
+  })
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+  return res.json()
+}
+
+export async function listAiDispatchRuns(): Promise<AiDispatchRunListItem[]> {
+  const res = await fetch('/api/simulation/ai-dispatch-runs')
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+  return res.json()
+}
+
+export async function loadAiDispatchRun(runId: string): Promise<SimulationRunResult> {
+  const res = await fetch(`/api/simulation/ai-dispatch-runs/${runId}`)
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
   return res.json()
 }

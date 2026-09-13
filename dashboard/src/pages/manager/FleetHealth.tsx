@@ -7,8 +7,11 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
 
-// Backed by live.truck_maintenance_state -- the 85%-of-interval / 10-days-to-due warning rule is
-// exactly what research/roadstar_platform_plan.md Section 5 specifies, not invented here.
+// Real user pivot: "what happened at the end of the simulation for the day" -- backed by
+// simulation.truck_maintenance_state (sim/sql/038), populated per truck by the most recent
+// AI-dispatch replay (sim/live/ai_dispatch_replay.py), not live.* telemetry. The 85%-of-interval /
+// 10-days-to-due warning rule is exactly what research/roadstar_platform_plan.md Section 5
+// specifies, not invented here.
 const POLL_MS = 30000
 const SERVICE_INTERVAL_KM_WARN = 0.85
 
@@ -40,10 +43,21 @@ export default function FleetHealth() {
   const [sorting, setSorting] = React.useState<SortingState>([])
 
   const refresh = React.useCallback(async () => {
+    // Real user pivot: no more live.* -- reads whichever simulation run is most recent (a fresh
+    // AI-dispatch replay), not a single always-on live table.
+    const { data: latestRun } = await supabase.schema('simulation').from('runs').select('run_id').order('created_at', { ascending: false }).limit(1).single()
+    if (!latestRun) {
+      setRows([])
+      return
+    }
+    // simulation.truck_maintenance_state has no maintenance_until column (unlike the old live.*
+    // table) -- no real "in the shop" concept exists in a one-day replay, only the km/days-since-
+    // service figures below.
     const { data, error } = await supabase
-      .schema('live')
+      .schema('simulation')
       .from('truck_maintenance_state')
-      .select('truck_number,cumulative_km_since_service,last_service_at,service_interval_km,service_interval_days,maintenance_until')
+      .select('truck_number,cumulative_km_since_service,last_service_at,service_interval_km,service_interval_days')
+      .eq('run_id', latestRun.run_id)
     if (error) {
       console.error('fleet health refresh failed', error)
       return

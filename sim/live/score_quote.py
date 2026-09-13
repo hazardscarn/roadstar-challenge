@@ -532,6 +532,8 @@ def build_candidates(data: SimData, fleet: list[LiveDriverRow], order: Order, no
         proj, next_trip = result
 
         dh_miles, dh_hours = get_route(data, proj.location_id, order.origin_location_id)
+        median_pickup_dwell_h = data.dwell_minutes['pickup'][1] / 60
+        median_delivery_dwell_h = data.dwell_minutes['delivery'][1] / 60
 
         if next_trip is not None:
             # Free AT pickup_at, but this driver already has a LATER trip committed -- reject if
@@ -542,8 +544,6 @@ def build_candidates(data: SimData, fleet: list[LiveDriverRow], order: Order, no
             # the loaded haul itself, unload dwell -- the same real median-dwell figures used
             # everywhere else in this project (build_order_from_quote(), run_sim.py's own
             # promised_delivery_at construction), not a second, inconsistent guess.
-            median_pickup_dwell_h = data.dwell_minutes['pickup'][1] / 60
-            median_delivery_dwell_h = data.dwell_minutes['delivery'][1] / 60
             new_order_duration_hours = dh_hours + median_pickup_dwell_h + order.loaded_hours + median_delivery_dwell_h
             if order.requested_pickup_at + timedelta(hours=new_order_duration_hours) > next_trip.eta:
                 continue  # would collide with / delay this driver's next already-committed trip
@@ -558,7 +558,11 @@ def build_candidates(data: SimData, fleet: list[LiveDriverRow], order: Order, no
             days_since_service=proj.truck_pct_days_interval * 180,
         )
         planned_driving = dh_hours + order.loaded_hours
-        planned_duty = planned_driving + 1.5  # matches run_sim.py's own feasibility-only dwell estimate
+        # Real user correction: this used to be a flat "+1.5" guess -- now the same real calibrated
+        # median dwell (pickup + delivery, ~1.0h combined) used a few lines above for
+        # new_order_duration_hours, and by every other real-dwell call site in this project
+        # (sim/dispatch_solver.py's dwell_hours_per_order(), run_sim.py's own estimate below).
+        planned_duty = planned_driving + median_pickup_dwell_h + median_delivery_dwell_h
 
         home_miles_now, home_hours_now = get_route(data, proj.location_id, home_hub_id)
         if home_hub_id not in home_hub_landing_cache:

@@ -62,3 +62,19 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+/* Real bug found directly (not a stale-server issue -- verified the dev server was serving
+   current code): Leaflet's own control chrome (.leaflet-top/.leaflet-bottom -- zoom buttons, the
+   leaflet-draw toolbar) ships at z-index:1000 (node_modules/leaflet/dist/leaflet.css), and
+   .leaflet-container itself sets no position/z-index/isolation of its own -- so it never
+   establishes a stacking context that CONTAINS that 1000. Those controls' z-index is compared
+   directly against the rest of the page, including a Dialog portal at z-50 (Tailwind's z-index:50,
+   dashboard/src/components/ui/dialog.tsx) -- Leaflet's toolbar wins, and visually punches through
+   ANY dialog opened over a map, on every page that has one (Simulation Trip's geofence editor is
+   just where it was reported). `isolation: isolate` gives every map its OWN self-contained
+   stacking context -- Leaflet's internal 1000 stays scoped to itself and can never again compete
+   with page-level z-index values, without having to chase every current and future dialog's
+   z-index number to stay ahead of it. */
+.leaflet-container {
+  isolation: isolate;
+}

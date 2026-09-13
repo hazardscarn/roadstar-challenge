@@ -34,35 +34,266 @@ from datetime import datetime, timedelta, timezone
 
 from sim.db import cursor
 from sim.engine.run_sim import driver_home_hub_id, load_sim_data
+from sim.hub_weights import BARRIE_SHARE, LONDON_SHARE, MILTON_SHARE, hub_quotas
 
-FLEET_SIZE = 30
+FLEET_SIZE = 20  # real user ask: a smaller, more legible demo fleet -- orders/day (~40-57,
+# calibration.order_arrival_rate's own real weekday integral) comfortably exceeds this now,
+# a real >2:1 ratio, instead of the near-1:1 ratio a 30-truck fleet left the optimizer with.
+
+# Real user ask: a small demo fleet drawn purely by driver_id order can easily end up with ZERO
+# Reefer/Flatbed trucks by pure chance -- real company-wide share is only ~4.4% Reefer, ~10.4%
+# Flatbed (ground_truth.historical_orders load_type counts, checked directly: 92/215/1763 of
+# 2,070 total) -- expected count in a 20-truck sample is under 1 for Reefer. Floored, not left to
+# chance, same "real proportion, but with a floor so small regions/types aren't literally zero"
+# pattern already used for order geography (sim/live/generate_dispatch_day.py) and hub shares
+# (sim/calibrate_truck_profile.py) elsewhere in this project.
+MIN_REEFER_TRUCKS = 2
+MIN_FLATBED_TRUCKS = 2
 
 
-def _build_fleet_roster(cur) -> tuple[list[int], dict[int, str]]:
-    """Real driver_id -> truck_number pairs (ground_truth.driver_equipment) first, filled to
-    FLEET_SIZE with other real driver_ids matched to real, not-already-claimed truck_numbers --
-    see module docstring. Deterministic (sorted), not random, so re-running this script without
-    changing FLEET_SIZE always seeds the same roster.
+def _fleet_candidates(cur) -> tuple[dict[str, list[tuple[int, str, str, bool]]], dict[str, str], list[tuple[int, str, str, bool]]]:
+    """Shared step behind both _build_fleet_roster() (the fixed default 55/30/15 fleet used by
+    live-ops seeding) and _build_fleet_roster_custom() (the Dispatch Board's Setup-panel-driven
+    fleet, real user ask -- pick hub/type counts directly instead of the app deciding them):
+    builds the full pool of (driver_id, truck_number, hub, is_real_pair) candidates -- real
+    driver_equipment pairs preferred, hub-mismatched real pairs dropped and same-hub synthesized
+    instead (see the real bug this fixed, below) -- bucketed by hub, plus a truck_number ->
+    truck_type lookup. Both callers select FROM this same pool so "which real pairs/hubs exist"
+    is computed once, one real way, no matter which selection policy runs on top of it.
     """
     cur.execute('select driver_id, truck_number from ground_truth.driver_equipment where truck_number is not null order by driver_id')
-    real_pairs = cur.fetchall()
-    driver_trucks = dict(real_pairs)
-    used_trucks = set(driver_trucks.values())
+    real_pairs = dict(cur.fetchall())
 
     cur.execute('select driver_id from ground_truth.drivers order by driver_id')
     all_driver_ids = [r[0] for r in cur.fetchall()]
-    remaining_drivers = [d for d in all_driver_ids if d not in driver_trucks]
 
     cur.execute('select truck_number from ground_truth.trucks order by truck_number')
     all_truck_numbers = [r[0] for r in cur.fetchall()]
-    remaining_trucks = [t for t in all_truck_numbers if t not in used_trucks]
 
-    n_extra = FLEET_SIZE - len(driver_trucks)
-    for driver_id, truck_number in zip(remaining_drivers[:n_extra], remaining_trucks[:n_extra]):
-        driver_trucks[driver_id] = truck_number
+    cur.execute("""
+        select dhh.driver_id, hub.city from calibration.driver_home_hub dhh
+        join reference.locations hub on hub.location_id = dhh.hub_location_id
+    """)
+    driver_hub = dict(cur.fetchall())
 
-    driver_ids = sorted(driver_trucks)[:FLEET_SIZE]
-    return driver_ids, {d: driver_trucks[d] for d in driver_ids}
+    cur.execute("""
+        select tp.truck_number, tp.truck_type, hub.city from calibration.truck_profile tp
+        join reference.locations hub on hub.location_id = tp.home_hub_location_id
+    """)
+    truck_type: dict[str, str] = {}
+    truck_hub: dict[str, str] = {}
+    for truck_number, ttype, hub in cur.fetchall():
+        truck_type[truck_number] = ttype
+        truck_hub[truck_number] = hub
+
+    used_trucks = set(real_pairs.values())
+    unclaimed_trucks = [t for t in all_truck_numbers if t not in used_trucks]
+    drivers_without_pair = [d for d in all_driver_ids if d not in real_pairs]
+
+    if not driver_hub or not truck_hub:
+        # calibration tables not seeded yet -- degrade to a single unhubbed bucket rather than
+        # crash (matches the old plain-fill fallback); callers' quota logic just won't find any
+        # named hub and will fall through to their own leftover-fill path.
+        synthesized_pairs = dict(zip(drivers_without_pair, unclaimed_trucks))
+        all_pairs = {**real_pairs, **synthesized_pairs}
+        candidates = [(d, t, None, d in real_pairs) for d, t in all_pairs.items()]
+        return {}, truck_type, candidates
+
+    # Real bug found directly (checked, not assumed): a truck's calibrated home hub
+    # (calibration.truck_profile) is drawn INDEPENDENTLY of its real driver's own calibrated hub
+    # (calibration.driver_home_hub) -- two separate random draws with no relationship to each
+    # other, so a driver correctly picked for a hub-quota slot could still end up paired with a
+    # truck the dispatch board displays as a DIFFERENT hub. Real driver_equipment pairs that
+    # disagree are dropped here (not overridden -- a real pair with a fabricated hub relabeled on
+    # top of it isn't more real than a synthesized one); those drivers get a same-hub SYNTHESIZED
+    # truck instead, chosen to match, not just the next truck_number in line.
+    real_pairs = {d: t for d, t in real_pairs.items() if driver_hub.get(d) == truck_hub.get(t)}
+    used_trucks = set(real_pairs.values())
+    unclaimed_trucks = [t for t in all_truck_numbers if t not in used_trucks]
+    drivers_without_pair = [d for d in all_driver_ids if d not in real_pairs]
+
+    trucks_by_hub: dict[str, list[str]] = {}
+    for t in unclaimed_trucks:
+        trucks_by_hub.setdefault(truck_hub.get(t), []).append(t)
+    synthesized_pairs: dict[int, str] = {}
+    for d in drivers_without_pair:
+        pool = trucks_by_hub.get(driver_hub.get(d)) or unclaimed_trucks  # same-hub if any exist, else any leftover
+        if not pool:
+            continue
+        t = pool.pop(0)
+        if t in unclaimed_trucks:
+            unclaimed_trucks.remove(t)
+        synthesized_pairs[d] = t
+
+    # (driver_id, truck_number, hub, is_real_pair) for every one of the 131 real drivers.
+    all_pairs = {**real_pairs, **synthesized_pairs}
+    candidates = [
+        (d, t, driver_hub.get(d), d in real_pairs)
+        for d, t in all_pairs.items()
+        if driver_hub.get(d) is not None
+    ]
+    by_hub: dict[str, list[tuple[int, str, str, bool]]] = {}
+    for c in candidates:
+        by_hub.setdefault(c[2], []).append(c)
+    for hub_bucket in by_hub.values():
+        hub_bucket.sort(key=lambda c: (not c[3], c[0]))  # real pairs first, then by driver_id
+    return by_hub, truck_type, candidates
+
+
+def _build_fleet_roster(cur) -> tuple[list[int], dict[int, str]]:
+    """Real user correction: taking ALL real ground_truth.driver_equipment pairs unconditionally
+    (the old behavior) meant the demo fleet's HUB mix was whatever those ~18 real pairs' hubs
+    happened to be, regardless of the discussed Milton/London/Barrie target -- real driver_equipment
+    is itself heavily Milton-concentrated (matches the real historical fleet's own operating
+    pattern), so a demo fleet built that way could show near-zero London or Barrie trucks even
+    after calibration.driver_home_hub's OWN population-level proportions were fixed. This now
+    selects the FLEET_SIZE roster by HUB QUOTA first (sim/hub_weights.py's fixed Milton 55/
+    London 30/Barrie 15 shares, applied to the SMALL demo fleet directly, not just the full
+    131-driver population), preferring real driver_equipment pairs within each hub bucket where
+    available, then floors truck TYPE (Reefer/Flatbed) via a same-hub swap so the fleet has real
+    equipment diversity too -- see MIN_REEFER_TRUCKS/MIN_FLATBED_TRUCKS above. This is the fixed,
+    no-controls fleet every OTHER caller (live-ops seeding, seed_demo_accounts.py) still uses; the
+    Dispatch Board's own Setup panel calls _build_fleet_roster_custom() below instead.
+    """
+    by_hub, truck_type, candidates = _fleet_candidates(cur)
+    if not by_hub:
+        pair_map = {d: t for d, t, _h, _r in candidates}
+        driver_ids = sorted(pair_map)[:FLEET_SIZE]
+        return driver_ids, {d: pair_map[d] for d in driver_ids}
+
+    quotas = hub_quotas(FLEET_SIZE, {'Milton': MILTON_SHARE, 'London': LONDON_SHARE, 'Barrie': BARRIE_SHARE})
+    selected = [c for hub, n in quotas.items() for c in by_hub.get(hub, [])[:n]]
+    shortfall = FLEET_SIZE - len(selected)
+    if shortfall > 0:  # a hub's real candidate pool ran dry -- fill from whoever's left, any hub
+        chosen_ids = {c[0] for c in selected}
+        leftover = sorted((c for c in candidates if c[0] not in chosen_ids), key=lambda c: (not c[3], c[0]))
+        selected.extend(leftover[:shortfall])
+
+    selected = _type_floored_swap(selected, by_hub, truck_type)
+
+    driver_ids = sorted(c[0] for c in selected)
+    return driver_ids, {c[0]: c[1] for c in selected}
+
+
+def _build_fleet_roster_custom(
+    cur, hub_counts: dict[str, int], type_shares: dict[str, float],
+) -> tuple[list[int], dict[int, str], dict[str, int], dict[str, int]]:
+    """The Dispatch Board's Setup-panel fleet: an exact per-hub team count (`hub_counts`, e.g.
+    {'Milton': 11, 'London': 6, 'Barrie': 3}) and a target truck-type mix (`type_shares`, e.g.
+    {'Dry Van': 0.70, 'Reefer': 0.25, 'Flatbed': 0.05}) picked by the user, not a fixed 20/55/30/15
+    the app decides -- real user ask, to simplify and put the demo's scale/mix directly in their
+    hands for this POC instead of buried in calibration scripts. Selects real driver/truck pairs
+    from the SAME pool _build_fleet_roster() uses (_fleet_candidates()).
+
+    Type quota is computed ONCE, GLOBALLY (hub_quotas(total, type_shares)), not per hub -- real bug
+    found directly: rounding a small share (5% Flatbed) independently within each small hub bucket
+    (11/6/3 for a 20-truck fleet) rounds DOWN to zero in every single hub, so a 5% target could
+    never actually appear no matter how many times Simulate ran, even though the population clearly
+    has real Flatbed trucks to give it. Computing the quota over the whole fleet first, then placing
+    those slots into whichever hub still has room and a real candidate of that type (scarcest type
+    first, so a thin type isn't crowded out by a bigger one claiming every hub first), fixes that
+    while still hitting each hub's own count exactly. Real equipment inventory is still finite and
+    hub-skewed (checked directly: Barrie currently has zero real Flatbed trucks) -- if a requested
+    mix asks for more of a type than real inventory can supply anywhere, this backfills same-hub-
+    any-type, then any-hub-any-type, and returns the ACTUAL hub/type counts achieved so the caller
+    can tell the user plainly when a request couldn't be fully honored, not claim it silently was.
+    """
+    by_hub, truck_type, candidates = _fleet_candidates(cur)
+    total_requested = sum(hub_counts.values())
+
+    if not by_hub:  # calibration not seeded -- no hub/type signal to quota against at all
+        pair_map = {d: t for d, t, _h, _r in candidates}
+        driver_ids = sorted(pair_map)[:total_requested]
+        driver_trucks = {d: pair_map[d] for d in driver_ids}
+        return driver_ids, driver_trucks, {}, {}
+
+    remaining_hub_slots = {hub: n for hub, n in hub_counts.items() if n > 0}
+    selected: list[tuple[int, str, str, bool]] = []
+    selected_ids: set[int] = set()
+
+    global_type_quota = hub_quotas(total_requested, type_shares) if type_shares else {}
+    for t in sorted(global_type_quota, key=lambda t: global_type_quota[t]):  # scarcest type first
+        want = global_type_quota[t]
+        got = 0
+        for hub in sorted(remaining_hub_slots, key=lambda h: -remaining_hub_slots[h]):
+            if got >= want or remaining_hub_slots[hub] <= 0:
+                continue
+            cands = sorted(
+                (c for c in by_hub.get(hub, []) if truck_type.get(c[1]) == t and c[0] not in selected_ids),
+                key=lambda c: (not c[3], c[0]),
+            )
+            take = min(len(cands), remaining_hub_slots[hub], want - got)
+            for c in cands[:take]:
+                selected.append(c)
+                selected_ids.add(c[0])
+                remaining_hub_slots[hub] -= 1
+                got += 1
+
+    # Any hub still short (its type-preferred candidates ran out, or type_shares was empty) --
+    # fill with whatever's left in that SAME hub, any type, before falling back further.
+    for hub, n_left in list(remaining_hub_slots.items()):
+        if n_left <= 0:
+            continue
+        leftover = sorted(
+            (c for c in by_hub.get(hub, []) if c[0] not in selected_ids),
+            key=lambda c: (not c[3], c[0]),
+        )
+        for c in leftover[:n_left]:
+            selected.append(c)
+            selected_ids.add(c[0])
+            remaining_hub_slots[hub] -= 1
+
+    if len(selected) < total_requested:  # a whole hub ran short of real candidates -- fill from any hub
+        leftover = sorted((c for c in candidates if c[0] not in selected_ids), key=lambda c: (not c[3], c[0]))
+        selected.extend(leftover[:total_requested - len(selected)])
+
+    driver_ids = sorted(c[0] for c in selected)
+    driver_trucks = {c[0]: c[1] for c in selected}
+    actual_hub_counts: dict[str, int] = {}
+    actual_type_counts: dict[str, int] = {}
+    for c in selected:
+        actual_hub_counts[c[2]] = actual_hub_counts.get(c[2], 0) + 1
+        t = truck_type.get(c[1], 'Dry Van')
+        actual_type_counts[t] = actual_type_counts.get(t, 0) + 1
+    return driver_ids, driver_trucks, actual_hub_counts, actual_type_counts
+
+
+def _type_floored_swap(
+    selected: list[tuple[int, str, str, bool]], by_hub: dict[str, list], truck_type: dict[str, str],
+) -> list[tuple[int, str, str, bool]]:
+    """Guarantees at least MIN_REEFER_TRUCKS/MIN_FLATBED_TRUCKS of each real type in the final
+    fleet -- real company-wide share is only ~4.4% Reefer, ~10.4% Flatbed (ground_truth.
+    historical_orders load_type counts: 92/215/1763 of 2,070), so a small demo fleet chosen by hub
+    quota alone can still land on zero of either by chance. Swaps a same-hub Dry Van pick for an
+    available Reefer/Flatbed candidate that DIDN'T make the hub-quota cut, preserving both the hub
+    quota (swap stays within the same hub) and, where possible, real driver_equipment pairs
+    (prefers swapping out a synthesized pick before a real one)."""
+    selected = list(selected)
+    for want_type, floor in (('Reefer', MIN_REEFER_TRUCKS), ('Flatbed', MIN_FLATBED_TRUCKS)):
+        have = sum(1 for c in selected if truck_type.get(c[1]) == want_type)
+        selected_ids = {c[0] for c in selected}
+        for hub_bucket in by_hub.values():
+            if have >= floor:
+                break
+            candidates_of_type = [c for c in hub_bucket if truck_type.get(c[1]) == want_type and c[0] not in selected_ids]
+            for candidate in candidates_of_type:
+                if have >= floor:
+                    break
+                # Swap out this hub's worst current pick (synthesized over real, Dry Van already
+                # counted) that isn't itself a floor-protected Reefer/Flatbed pick.
+                same_hub_swappable = [
+                    c for c in selected if c[2] == candidate[2] and truck_type.get(c[1]) not in ('Reefer', 'Flatbed')
+                ]
+                if not same_hub_swappable:
+                    continue
+                same_hub_swappable.sort(key=lambda c: c[3])  # synthesized (False) before real (True)
+                out = same_hub_swappable[0]
+                selected.remove(out)
+                selected.append(candidate)
+                selected_ids.discard(out[0])
+                selected_ids.add(candidate[0])
+                have += 1
+    return selected
 
 
 # MID_ROUTE/HUB shares kept proportional to the original 8-driver seed (2/8 mid-route, 1/8 hub).

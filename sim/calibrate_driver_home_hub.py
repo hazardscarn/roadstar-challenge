@@ -12,35 +12,31 @@ fleet collapsed onto ONE home hub (London) -- real user report, and a genuine mi
 that the real company only operates from one depot, it's that this one column just never got
 populated with real per-driver granularity.
 
+## REVISED for the 3-hub day-ahead dispatch pivot (sim/sql/048_dispatch_board.sql)
+
+Barrie is now a REAL reference.locations terminal_hub row (was an assumed anchor via a proxy
+customer location, RONA INC. (BARRIE)) and Niagara Falls is dropped entirely -- the dispatch
+board only operates 3 real hubs (London/Milton/Barrie), so every driver's home hub needs to
+resolve to one of exactly those 3, not a 4th city with no real dispatch presence.
+
 ## The real signal that DOES exist
 
 ground_truth.historical_legs (driver_id) joined to ground_truth.historical_orders (the real
 geocoded origin) shows each driver's actual habitual real pickup pattern. Checked directly: only
 53 of 131 drivers have enough of this real history to infer a pattern from -- for those, THIS
-script buckets their most-frequent real origin to the NEAREST of 4 real anchor points (real
-haversine distance, sim.engine.run_sim._haversine_km, the same function every other real-distance
-feature in this project uses):
-
-- London, Milton -- the two REAL RoadStar terminals on file (reference.locations, tier=
-  terminal_hub).
-- Barrie, Niagara Falls -- the other two cities the brief's own coverage area names (documents/
-  1788654151601_Hackathon_Project_Brief.pdf Section 2), used as ASSUMED home-base stand-ins via a
-  real, already-geocoded customer location in each city (RONA INC. (BARRIE), RONA INC. (NIAGARA
-  FALLS)) -- there is no real RoadStar terminal recorded in either city, so this is flagged
-  'assumed' too, same honesty standard the rest of this project holds every synthesized figure to.
-
-Among the 53, Milton (16 drivers) is actually MORE common than London (4) -- confirmed directly,
-not assumed either -- so "everyone's really based in London" was never true of the real signal,
-only of the blank terminal_zone column.
+script buckets their most-frequent real origin to the NEAREST of the 3 real hubs (real haversine
+distance, sim.engine.run_sim._haversine_km, the same function every other real-distance feature
+in this project uses).
 
 ## The other 78 drivers -- no real signal at all
 
-Assigned via a DETERMINISTIC seeded weighted draw from the EMPIRICAL distribution observed in the
-53 drivers who DO have real data (Laplace-smoothed +1 per anchor, so a hub with zero real
-observations isn't literally impossible to draw) -- "we don't know these drivers' real home, so
-assume they're distributed the way the ones we DO have real data for are distributed," a real-
-data-informed assumption, not a uniform guess. Flagged source='assumed' so any downstream reader
-can always tell which population a given driver's hub came from.
+Assigned via a DETERMINISTIC seeded weighted draw -- but NOT an even/empirically-uniform split
+across anchors anymore. Real user feedback: derive the real London vs. Milton ratio from the 53
+historical drivers' own signal (sim/hub_weights.py), then fold Barrie in at a fixed ~20% share
+(it's a brand-new hub with zero real history to derive a share from), scaling London/Milton's
+real ratio down to fill the remaining 80% -- real signal preserved where it exists, one clearly-
+labeled assumption where it doesn't, and the SAME weighting `sim/calibrate_truck_profile.py` uses
+for truck home hubs, so trucks and drivers end up with consistent hub proportions.
 
 Run once (idempotent -- truncates and rebuilds): `python -m sim.calibrate_driver_home_hub`
 """
@@ -51,11 +47,8 @@ from psycopg2.extras import execute_values
 
 from sim.db import cursor
 from sim.engine.run_sim import _haversine_km
+from sim.hub_weights import compute_hub_weights, hub_quotas
 
-# location_id -> real anchor name. 1/2 are the two real RoadStar terminals (reference.locations,
-# tier=terminal_hub); 5719/5713 are real, already-geocoded customer locations used as ASSUMED
-# stand-ins for the two other brief coverage cities with no real terminal on file.
-ANCHOR_LOCATIONS = {1: "London", 2: "Milton", 5719: "Barrie", 5713: "Niagara Falls"}
 SEED = 42  # deterministic/reproducible -- this project's own convention (real_data_replay.py's seed=1, etc.), just this script's own independent draw
 
 
@@ -65,9 +58,24 @@ def nearest_anchor(lat: float, lon: float, anchor_coords: dict[int, tuple[float,
 
 def build() -> None:
     with cursor() as cur:
+        # Resolve the 3 real hub location_ids by label rather than hardcoding IDs -- Barrie's
+        # exact id depends on insert order, London/Milton's don't change but there's no reason to
+        # treat them differently.
+        cur.execute("select location_id, label from reference.locations where label like 'RoadStar Terminal%'")
+        anchor_locations: dict[int, str] = {}
+        for loc_id, label in cur.fetchall():
+            for name in ("London", "Milton", "Barrie"):
+                if name in label:
+                    anchor_locations[loc_id] = name
+        if len(anchor_locations) != 3:
+            raise RuntimeError(f"Expected exactly 3 real terminal hubs, found {anchor_locations} -- run sim/sql/048_dispatch_board.sql first.")
+        london_id = next(i for i, n in anchor_locations.items() if n == "London")
+        milton_id = next(i for i, n in anchor_locations.items() if n == "Milton")
+        barrie_id = next(i for i, n in anchor_locations.items() if n == "Barrie")
+
         cur.execute(
             "select location_id, ST_Y(geog::geometry), ST_X(geog::geometry) from reference.locations where location_id = any(%s)",
-            (list(ANCHOR_LOCATIONS),),
+            (list(anchor_locations),),
         )
         anchor_coords = {loc_id: (lat, lon) for loc_id, lat, lon in cur.fetchall()}
 
@@ -103,24 +111,51 @@ def build() -> None:
         lat, lon = loc_coords[top_loc]
         historical_hub[driver_id] = nearest_anchor(lat, lon, anchor_coords)
 
-    anchor_ids = list(ANCHOR_LOCATIONS)
+    # Fixed, discussed population-level shares (sim/hub_weights.py -- Milton 55/London 30/
+    # Barrie 15) -- real user correction: the pure real-ratio-derived split (this used to feed
+    # `compute_hub_weights` the REAL London:Milton counts above) turned out so Milton-heavy that
+    # the FULL 131-driver population landed at ~76% Milton / ~8% London / ~17% Barrie, checked
+    # directly -- not the discussed target, and it collapsed London (a REAL, currently-operating
+    # hub) to almost nothing. Real signal is still used -- as a per-driver PREFERENCE for which
+    # hub they land in -- but the POPULATION PROPORTION is now a hard quota, not an emergent
+    # property of however skewed the raw historical signal happens to be.
+    hub_weights = compute_hub_weights({}, london_id, milton_id, barrie_id)
+    anchor_ids = list(hub_weights)
+    quotas = hub_quotas(len(all_driver_ids), {a: hub_weights[a] for a in anchor_ids})
 
-    # Real user feedback / correction: weighting the ASSUMED 78 by the real 53's own empirical
-    # split just recreates concentration at a different city (the 53's real signal is itself
-    # Milton/GTA-heavy -- most of their real customer stops are geographically closer to Milton
-    # than to Barrie/Niagara Falls, so an empirically-weighted draw put 101/131 drivers at Milton,
-    # not meaningfully better than the original all-London collapse it was meant to fix). The 53
-    # historical drivers keep their REAL signal untouched, whatever it shows -- but there is no
-    # real signal at all for the other 78, so there's no accuracy lost spreading THEM evenly
-    # across all 4 anchors instead: gives the fleet genuine multi-hub diversity, which was the
-    # actual ask, rather than a second, differently-shaped concentration.
     rng = random.Random(SEED)
+    assigned_hub: dict[int, int] = {}
+    remaining_quota = dict(quotas)
+    deferred: list[int] = []
+
+    # Real signal first, honored as a preference up to quota -- a driver whose real activity
+    # clusters near London gets London if a London slot is still open.
+    signal_drivers = sorted(historical_hub, key=lambda d: d)
+    rng.shuffle(signal_drivers)  # so which drivers get deferred when a quota fills isn't just "highest driver_id loses"
+    for driver_id in signal_drivers:
+        preferred = historical_hub[driver_id]
+        if remaining_quota.get(preferred, 0) > 0:
+            assigned_hub[driver_id] = preferred
+            remaining_quota[preferred] -= 1
+        else:
+            deferred.append(driver_id)
+
+    # Everyone else (no real signal, or their preferred hub's quota was already full) fills
+    # whatever's left, in a deterministic seeded order -- exactly consumes remaining_quota to 0.
+    no_signal_drivers = [d for d in all_driver_ids if d not in historical_hub]
+    fill_order = deferred + no_signal_drivers
+    rng.shuffle(fill_order)
+    hub_pool = [hub for hub, n in remaining_quota.items() for _ in range(n)]
+    rng.shuffle(hub_pool)
+    for driver_id, hub in zip(fill_order, hub_pool):
+        assigned_hub[driver_id] = hub
+
     rows_to_write = []
     for driver_id in all_driver_ids:
-        if driver_id in historical_hub:
-            rows_to_write.append((driver_id, historical_hub[driver_id], "historical"))
+        if driver_id in historical_hub and assigned_hub.get(driver_id) == historical_hub[driver_id]:
+            rows_to_write.append((driver_id, assigned_hub[driver_id], "historical"))
         else:
-            hub = rng.choice(anchor_ids)
+            hub = assigned_hub[driver_id]
             rows_to_write.append((driver_id, hub, "assumed"))
 
     with cursor() as cur:
@@ -134,7 +169,7 @@ def build() -> None:
     n_historical = sum(1 for _did, _hub, src in rows_to_write if src == "historical")
     print(f"Wrote {len(rows_to_write)} driver home-hub rows ({n_historical} historical, {len(rows_to_write) - n_historical} assumed)")
     hub_counts = Counter(hub for _did, hub, _src in rows_to_write)
-    for loc_id, name in ANCHOR_LOCATIONS.items():
+    for loc_id, name in anchor_locations.items():
         print(f"  {name} (loc {loc_id}): {hub_counts.get(loc_id, 0)} drivers")
 
 

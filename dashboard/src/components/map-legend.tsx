@@ -3,7 +3,7 @@ const TRUCK_ITEMS = [
   { color: '#1f9d55', label: 'Driving' },
   { color: '#e0940f', label: 'At dock (loading/unloading)' },
   { color: '#6b7382', label: 'Idle' },
-  { color: '#d9342b', label: 'HOS critical / inspection issue' },
+  { color: '#d9342b', label: 'HOS critical (<2h)' },
 ]
 
 export function MapLegend() {
@@ -22,9 +22,9 @@ export function MapLegend() {
 }
 
 const QUOTE_ITEMS: { color: string; label: string; tone: string }[] = [
-  { color: '#2a5cdb', label: 'Open — awaiting assignment', tone: 'blue' },
-  { color: '#1f9d55', label: 'Assigned', tone: 'green' },
-  { color: '#6b7382', label: 'Expired', tone: 'gray' },
+  { color: '#2a5cdb', label: 'Unassigned', tone: 'blue' },
+  { color: '#e0940f', label: 'Assigned — not yet dispatched', tone: 'amber' },
+  { color: '#1f9d55', label: 'Dispatched', tone: 'green' },
 ]
 
 export function QuoteStatusLegend() {

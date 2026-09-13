@@ -14,3 +14,4 @@ fastapi
 uvicorn[standard]
 reportlab
 scipy
+ortools==9.15.6755

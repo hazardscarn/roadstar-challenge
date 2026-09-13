@@ -20,6 +20,7 @@ from contextlib import contextmanager
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -27,7 +28,11 @@ psycopg2.extras.register_uuid()  # lets Python uuid.UUID objects (sim/engine/run
 
 
 def get_connection():
-    """Remote Supabase connection -- reference/ground_truth/calibration/live."""
+    """Remote Supabase connection -- reference/ground_truth/calibration/live. A fresh direct
+    connection every call (NOT pooled -- see `cursor()`'s own docstring for why the two need to
+    behave differently): the one direct caller of this function
+    (sim/live/trip_demo_simulator.py) holds the connection open for a whole run and calls
+    `conn.close()` itself, which would silently leak a slot from a shared pool forever."""
     db_url = os.environ.get('SUPABASE_DB_URL')
     if not db_url:
         raise RuntimeError(
@@ -50,16 +55,57 @@ def get_local_connection():
     return psycopg2.connect(db_url)
 
 
+# Real user feedback + a bug this project already found once before, independently, in
+# sim/live/trip_demo_simulator.py's own comment ("an earlier draft that opened a fresh connection
+# per tick... added real per-tick network round-trip latency... found directly in a live test
+# run"): opening a brand-new connection to the REMOTE Supabase instance for every `cursor()` call
+# pays a full TCP+TLS handshake every time -- checked directly on the Dispatch Board's drag-and-
+# drop endpoints, this was the dominant cost (~650-750ms for a SINGLE round trip after cutting
+# the query count from 9 to 1 -- cutting queries alone wasn't enough). Pooled here, once, for
+# every `cursor()` caller across the whole backend, instead of each hot path inventing its own
+# hold-the-connection-open workaround (trip_demo_simulator.py's own manual pattern, predating
+# this fix, is left as-is -- see get_connection()'s docstring for why it can't share this pool).
+# Lazily created (not at import time) so a one-off script that only touches one of local/remote
+# never pays for or requires the other's env var. Sized for this project's actual scale (a small
+# demo backend, not a high-concurrency production service) -- not tuned further without a real
+# load number to justify it.
+_pools: dict[str, psycopg2.pool.ThreadedConnectionPool] = {}
+
+
+def _pool(local: bool) -> psycopg2.pool.ThreadedConnectionPool:
+    key = 'local' if local else 'remote'
+    if key not in _pools:
+        # get_connection()/get_local_connection() raise the real "env var not set" error with
+        # setup instructions; opened once here just to validate before handing the same URL to
+        # the pool (which opens its own connections internally), then discarded immediately.
+        validated = get_local_connection() if local else get_connection()
+        validated.close()
+        db_url = os.environ['LOCAL_DB_URL'] if local else os.environ['SUPABASE_DB_URL']
+        _pools[key] = psycopg2.pool.ThreadedConnectionPool(1, 10, db_url)
+    return _pools[key]
+
+
 @contextmanager
 def cursor(commit=True, local=False):
-    conn = get_local_connection() if local else get_connection()
+    pool = _pool(local)
+    conn = pool.getconn()
+    broken = False
     try:
         cur = conn.cursor()
         yield cur
         if commit:
             conn.commit()
+    except Exception:
+        # A pooled connection MUST go back in a clean (non-aborted-transaction) state, or the
+        # next borrower inherits a broken transaction. If even rollback fails, the connection
+        # itself is dead (e.g. a dropped network link) -- close it instead of pooling it.
+        try:
+            conn.rollback()
+        except Exception:
+            broken = True
+        raise
     finally:
-        conn.close()
+        pool.putconn(conn, close=broken)
 
 
 def run_sql_file(path, local=False):

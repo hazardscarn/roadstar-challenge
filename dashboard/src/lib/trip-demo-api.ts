@@ -80,6 +80,15 @@ export async function startTripDemo(body: {
   return res.json()
 }
 
+// Real user ask: geofence editing needs to happen against a real trip_id BEFORE the truck starts
+// moving, not layered on top of an already-ticking simulation. startTripDemo() now only creates
+// the trip (parked, not yet moving); this releases it to actually begin ticking.
+export async function beginTripDemo(tripId: string): Promise<{ status: string }> {
+  const res = await fetch(`/api/trip-demo/${tripId}/begin`, { method: 'POST' })
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+  return res.json()
+}
+
 export async function getTripDemoLog(tripId: string, sinceId = 0): Promise<TripDemoLog> {
   const res = await fetch(`/api/trip-demo/${tripId}/log?since_id=${sinceId}`)
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)

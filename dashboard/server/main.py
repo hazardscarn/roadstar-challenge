@@ -12,10 +12,12 @@ Run: `source venv/bin/activate && uvicorn dashboard.server.main:app --port 8787 
 (from the repo root, so `sim.*` imports resolve).
 """
 import os
+import json
 import sys
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -32,7 +34,7 @@ from sim.db import cursor  # noqa: E402
 from sim.engine.route_interpolation import get_route_geometry, interpolate_position  # noqa: E402
 from sim.engine.run_sim import get_route, load_sim_data, run_simulation  # noqa: E402
 from sim.engine.value_function import load_state_value_model, make_value_fn  # noqa: E402
-from sim.live import telemetry_simulator  # noqa: E402
+from sim.live import dispatch_board, telemetry_simulator  # noqa: E402
 from sim.live.score_quote import QuoteRequest, score_quote  # noqa: E402
 from sim.live.trip_demo_simulator import SCENARIOS, run_trip_demo, start_trip_demo  # noqa: E402
 
@@ -382,9 +384,13 @@ def api_assign(body: AssignBody):
         loaded_miles, loaded_hours = get_route(data, origin_location_id, dest_location_id)
         dh_hours_est = float(deadhead_miles or 0) / AVG_NETWORK_SPEED_MPH
         planned_driving_hours = dh_hours_est + loaded_hours
-        planned_duty_hours = planned_driving_hours + 1.5
         median_pickup_dwell_h = data.dwell_minutes["pickup"][1] / 60
         median_delivery_dwell_h = data.dwell_minutes["delivery"][1] / 60
+        # Real user correction: this used to be a flat "+1.5" guess found nowhere in the data --
+        # now the real calibrated median (pickup + delivery dwell, ~1.0h combined), same figure
+        # sim/dispatch_solver.py's dwell_hours_per_order() and every other real-dwell call site in
+        # this project already uses, not a second, independent number for the same real quantity.
+        planned_duty_hours = planned_driving_hours + median_pickup_dwell_h + median_delivery_dwell_h
         planned_completion_at = eta_pickup + timedelta(
             hours=dh_hours_est + median_pickup_dwell_h + loaded_hours + median_delivery_dwell_h
         )
@@ -1550,6 +1556,104 @@ def _compute_cycle(cur, run_id: str, driver_id: int, this_trip_id) -> dict | Non
     }
 
 
+def _ai_dispatch_trip_row_to_sim_trip(r: tuple) -> dict:
+    (trip_id, driver_id, truck_number, hub_city, assigned_at_s, completed_at_s, arr_pickup_at_s,
+     dep_pickup_at_s, arr_delivery_at_s, origin_location_id, dest_location_id, origin_label, dest_label,
+     weight_lbs, pallets, load_type, order_revenue, deadhead_cost, deadhead_miles, net_margin,
+     detention_amount, is_detention_demo, trajectory) = r
+    return {
+        "trip_id": str(trip_id), "quote_id": "", "driver_id": driver_id, "truck_number": truck_number,
+        "hub_city": hub_city, "reload_immediate": False, "deadhead_saved": 0,
+        "assigned_at_s": float(assigned_at_s), "completed_at_s": float(completed_at_s),
+        "arr_pickup_at_s": float(arr_pickup_at_s) if arr_pickup_at_s is not None else None,
+        "dep_pickup_at_s": float(dep_pickup_at_s) if dep_pickup_at_s is not None else None,
+        "arr_delivery_at_s": float(arr_delivery_at_s) if arr_delivery_at_s is not None else None,
+        "origin_location_id": origin_location_id, "dest_location_id": dest_location_id,
+        "origin_label": origin_label, "dest_label": dest_label,
+        "weight_lbs": float(weight_lbs or 0), "pallets": pallets or 0, "load_type": load_type,
+        "order_revenue": float(order_revenue or 0), "deadhead_cost": float(deadhead_cost or 0),
+        "lateness_penalty": 0.0, "net_margin": float(net_margin or 0),
+        "deadhead_miles": float(deadhead_miles or 0), "on_time": True, "had_breakdown": False,
+        "detention_amount": float(detention_amount or 0), "is_detention_demo": bool(is_detention_demo),
+        "invoice_total": float(order_revenue or 0) + float(detention_amount or 0),
+        "trajectory": trajectory,
+    }
+
+
+@app.post("/api/simulation/ai-dispatch-run")
+def run_ai_dispatch_simulation(body: dict):
+    """Real user ask: replace the Simulation Showcase's old ML/RL-trained-policy week-long batch
+    sim with a full-day, multi-truck replay of what the AI (CP-SAT) dispatcher actually decided for
+    one real day -- sim/live/ai_dispatch_replay.py. `service_date` (YYYY-MM-DD) must already have
+    an AI-assigned (or manually dispatched) plan on the Dispatch Board."""
+    from sim.live.ai_dispatch_replay import generate as generate_ai_dispatch_replay
+    service_date = date.fromisoformat(body["service_date"])
+    try:
+        result = generate_ai_dispatch_replay(service_date)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "run_id": result["run_id"], "seed": 0, "sim_start": f"{service_date.isoformat()}T06:00:00+00:00",
+        "duration_seconds": max((t["completed_at_s"] for t in result["trips"]), default=0),
+        "summary": result["summary"], "fleet_metrics": None,
+        "trips": [_ai_dispatch_trip_row_to_sim_trip((
+            uuid.UUID(t["trip_id"]), t["driver_id"], t["truck_number"], t["hub_city"], t["assigned_at_s"],
+            t["completed_at_s"], t["arr_pickup_at_s"], t["dep_pickup_at_s"], t["arr_delivery_at_s"],
+            t["origin_location_id"], t["dest_location_id"], t["origin_label"], t["dest_label"],
+            t["weight_lbs"], t["pallets"], t["load_type"], t["order_revenue"], t["deadhead_cost"],
+            t["deadhead_miles"], t["net_margin"], t["detention_amount"], t["is_detention_demo"], t["trajectory"],
+        )) for t in result["trips"]],
+    }
+
+
+@app.get("/api/simulation/ai-dispatch-runs")
+def list_ai_dispatch_runs(limit: int = 20):
+    with cursor() as cur:
+        cur.execute(
+            """select run_id, scenario_label, created_at, n_orders_generated, n_completed, n_unassigned,
+                      total_revenue, net_margin, total_detention_billed
+               from simulation.runs where run_kind = 'ai_dispatch_day' order by created_at desc limit %s""",
+            (limit,),
+        )
+        rows = cur.fetchall()
+    return [
+        {"run_id": str(r[0]), "service_date": r[1], "created_at": r[2].isoformat(), "n_orders_generated": r[3],
+         "n_completed": r[4], "n_unassigned": r[5], "total_revenue": float(r[6] or 0), "net_margin": float(r[7] or 0),
+         "total_detention_billed": float(r[8] or 0)}
+        for r in rows
+    ]
+
+
+@app.get("/api/simulation/ai-dispatch-runs/{run_id}")
+def get_ai_dispatch_run(run_id: str):
+    with cursor() as cur:
+        cur.execute(
+            "select scenario_label, week_start, fleet_metrics from simulation.runs where run_id = %s and run_kind = 'ai_dispatch_day'",
+            (run_id,),
+        )
+        run_row = cur.fetchone()
+        if run_row is None:
+            raise HTTPException(404, "AI dispatch run not found")
+        service_date, sim_start, stored_summary = run_row
+
+        cur.execute(
+            """select trip_id, driver_id, truck_number, hub_city, assigned_at_s, completed_at_s,
+                      arr_pickup_at_s, dep_pickup_at_s, arr_delivery_at_s, origin_location_id, dest_location_id,
+                      origin_label, dest_label, weight_lbs, pallets, load_type, order_revenue, deadhead_cost,
+                      deadhead_miles, net_margin, detention_amount, is_detention_demo, trajectory
+               from simulation.ai_dispatch_trips where run_id = %s order by assigned_at_s""",
+            (run_id,),
+        )
+        trips = [_ai_dispatch_trip_row_to_sim_trip(r) for r in cur.fetchall()]
+
+    return {
+        "run_id": run_id, "seed": 0, "sim_start": sim_start.isoformat() if sim_start else None,
+        "duration_seconds": max((t["completed_at_s"] for t in trips), default=0),
+        "summary": stored_summary or {},
+        "fleet_metrics": None, "trips": trips,
+    }
+
+
 @app.get("/api/simulation/orders/{quote_id}/story")
 def simulation_order_story(quote_id: str):
     """The "explain everything" drill-in real user feedback asked for: one order's whole real
@@ -1778,12 +1882,30 @@ def trip_demo_scenarios():
     return SCENARIOS
 
 
+# Real user ask: geofence editing needs to happen BEFORE the truck starts moving, not layered on
+# top of an already-ticking simulation -- "first I should have the option to edit geofence, then
+# after I set it it should start." /start now only CREATES the trip (real trip_id, needed since
+# geofence overrides are keyed by trip_id) and parks its tick loop on this event instead of
+# launching it immediately; /begin below releases it. One in-memory registry is enough here (a
+# single-process demo app, not a distributed system) -- no DB schema change needed since the
+# already-built DemoTripHandle is just held, not reconstructed from scratch later.
+_pending_trip_demo_starts: dict[str, threading.Event] = {}
+
+
+def _run_trip_demo_when_signaled(handle, ready_event: threading.Event) -> None:
+    ready_event.wait()
+    run_trip_demo(handle)
+
+
 @app.post("/api/trip-demo/start")
 def trip_demo_start(body: TripDemoStartBody):
-    """Kicks off the single-trip live geofence/detention demo (sim/live/trip_demo_simulator.py) --
-    'Simulation Trip' page. Returns immediately with the new trip's ids; the actual tick loop runs
-    in a background thread (real ticks over several real seconds/minutes, TIME_SCALE-accelerated)
-    writing to `simulation.*` as it goes, polled via GET /api/trip-demo/{trip_id}/log below.
+    """Creates the single-trip live geofence/detention demo's trip (sim/live/trip_demo_simulator.py)
+    -- 'Simulation Trip' page -- and returns immediately with its real ids, but does NOT start the
+    truck moving yet. The tick loop (real ticks over several real seconds/minutes, TIME_SCALE-
+    accelerated, writing to `simulation.*` as it goes, polled via GET /api/trip-demo/{trip_id}/log)
+    only begins once POST /api/trip-demo/{trip_id}/begin is called -- real user ask, so a manager
+    can set up a custom pickup/dropoff geofence against the real trip_id first, THEN start the run,
+    instead of the two happening at the same moment.
     """
     if body.scenario not in SCENARIOS:
         raise HTTPException(400, f"scenario must be one of {list(SCENARIOS)}")
@@ -1796,7 +1918,9 @@ def trip_demo_start(body: TripDemoStartBody):
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    threading.Thread(target=run_trip_demo, args=(handle,), daemon=True).start()
+    ready_event = threading.Event()
+    _pending_trip_demo_starts[str(handle.trip_id)] = ready_event
+    threading.Thread(target=_run_trip_demo_when_signaled, args=(handle, ready_event), daemon=True).start()
     return {
         "run_id": str(handle.run_id), "trip_id": str(handle.trip_id), "quote_id": str(handle.quote_id),
         "driver_id": handle.driver_id, "truck_number": handle.truck_number, "scenario": handle.scenario,
@@ -1804,6 +1928,18 @@ def trip_demo_start(body: TripDemoStartBody):
         # frontend draws this directly instead of a second, independent /api/route fetch.
         "route_coords": [list(c) for c in handle.route_coords],
     }
+
+
+@app.post("/api/trip-demo/{trip_id}/begin")
+def trip_demo_begin(trip_id: str):
+    """Releases a trip created by /start to actually begin ticking. 404s if this trip_id was
+    never parked here (already begun, or an unknown id) -- idempotent-safe: calling it twice just
+    404s the second time rather than double-starting anything."""
+    event = _pending_trip_demo_starts.pop(trip_id, None)
+    if event is None:
+        raise HTTPException(404, "No pending trip demo waiting to start for this trip_id")
+    event.set()
+    return {"status": "started"}
 
 
 @app.get("/api/trip-demo/{trip_id}/log")
@@ -1864,27 +2000,29 @@ class GenerateInvoiceBody(BaseModel):
 
 @app.post("/api/invoices/generate")
 def generate_invoice(body: GenerateInvoiceBody):
-    """CRA-itemized invoice against the real live.invoices schema (sim/sql/030) -- linehaul,
-    detention, fuel surcharge, and accessorial kept SEPARATE (not pre-summed), subtotal/tax/total
-    are the schema's own generated columns. delivery_province is hardcoded 'ON' -- every real
-    order in this dataset is Ontario-to-Ontario (documents/schema_reference.md), not a guess for
-    THIS fleet, though the column exists for a future non-ON delivery. bill_to_name/address are
-    SYNTHESIZED from the delivery location's label -- no real shipper-identity table exists
-    anywhere in the source data (030's own header comment already flags this), not presented as
-    real customer contact info.
+    """CRA-itemized invoice against simulation.invoices (sim/sql/038) -- linehaul, detention, fuel
+    surcharge, and accessorial kept SEPARATE (not pre-summed), subtotal/tax/total are the schema's
+    own generated columns. Real user pivot: the simulation is now the app's only data source (no
+    more live.* telemetry) -- sim/live/ai_dispatch_replay.py's generate() already auto-creates a
+    'draft' invoice per trip right after a replay, so this endpoint is now mainly an idempotent
+    fallback (a trip somehow missing one), not the primary path. delivery_province is hardcoded
+    'ON' -- every real order in this dataset is Ontario-to-Ontario (documents/schema_reference.md),
+    not a guess for THIS fleet, though the column exists for a future non-ON delivery. bill_to_
+    name/address are SYNTHESIZED from the delivery location's label -- no real shipper-identity
+    table exists anywhere in the source data, not presented as real customer contact info.
     """
     with cursor() as cur:
         cur.execute(
-            "select driver_id, truck_number, loaded_miles, completed_at, load_fill_ratio from live.trip_log where trip_id = %s",
+            "select driver_id, truck_number, loaded_miles, completed_at, load_fill_ratio from simulation.trip_log where trip_id = %s",
             (body.trip_id,),
         )
         row = cur.fetchone()
         if not row:
             raise HTTPException(404, "No completed trip_log row for this trip_id")
-        _driver_id, _truck_number, loaded_miles, _completed_at, load_fill_ratio = row
+        _driver_id, _truck_number, loaded_miles, completed_at, load_fill_ratio = row
 
         cur.execute(
-            "select dest_location_id, quote_id, weight_lbs, pallets, load_type from live.trips where trip_id = %s",
+            "select dest_location_id, quote_id, weight_lbs, pallets, load_type from simulation.trips where trip_id = %s",
             (body.trip_id,),
         )
         trip_row = cur.fetchone()
@@ -1892,7 +2030,7 @@ def generate_invoice(body: GenerateInvoiceBody):
 
         service_type = "FTL"
         if quote_id:
-            cur.execute("select service_type from live.quote_requests where quote_id = %s", (quote_id,))
+            cur.execute("select service_type from simulation.quote_requests where quote_id = %s", (quote_id,))
             st_row = cur.fetchone()
             if st_row and st_row[0]:
                 service_type = st_row[0]
@@ -1904,7 +2042,7 @@ def generate_invoice(body: GenerateInvoiceBody):
             if r:
                 dest_label = r[0]
 
-        cur.execute("select amount from live.detention_billing where trip_id = %s", (body.trip_id,))
+        cur.execute("select amount from simulation.detention_billing where trip_id = %s", (body.trip_id,))
         det_row = cur.fetchone()
         detention_amount = float(det_row[0]) if det_row and det_row[0] is not None else 0.0
 
@@ -1921,18 +2059,19 @@ def generate_invoice(body: GenerateInvoiceBody):
         linehaul_amount = pricing["linehaul_amount"]
         fuel_surcharge_amount = pricing["fuel_surcharge_amount"]
 
-        cur.execute("select count(*) from live.invoices")
+        cur.execute("select count(*) from simulation.invoices")
         (seq,) = cur.fetchone()
         invoice_number = f"RS-{datetime.now(timezone.utc).year}-{seq + 1:04d}"
 
         invoice_id = uuid.uuid4()
-        due_at = datetime.now(timezone.utc) + timedelta(days=30)
+        issued_at = completed_at or datetime.now(timezone.utc)
+        due_at = issued_at + timedelta(days=30)
         cur.execute(
-            """insert into live.invoices
-                 (invoice_id, invoice_number, trip_id, quote_id, due_at, bill_to_name, bill_to_address,
+            """insert into simulation.invoices
+                 (invoice_id, invoice_number, trip_id, quote_id, issued_at, due_at, bill_to_name, bill_to_address,
                   delivery_province, linehaul_amount, detention_amount, fuel_surcharge_amount)
-               values (%s, %s, %s, %s, %s, %s, %s, 'ON', %s, %s, %s)""",
-            (invoice_id, invoice_number, body.trip_id, quote_id, due_at, dest_label, dest_label,
+               values (%s, %s, %s, %s, %s, %s, %s, %s, 'ON', %s, %s, %s)""",
+            (invoice_id, invoice_number, body.trip_id, quote_id, issued_at, due_at, dest_label, dest_label,
              linehaul_amount, detention_amount, fuel_surcharge_amount),
         )
 
@@ -2004,7 +2143,7 @@ def invoice_pdf(invoice_id: str):
             """select invoice_number, issued_at, due_at, bill_to_name, bill_to_address, delivery_province,
                       linehaul_amount, detention_amount, fuel_surcharge_amount, accessorial_amount,
                       subtotal, tax_rate, tax_amount, total_amount
-               from live.invoices where invoice_id = %s""",
+               from simulation.invoices where invoice_id = %s""",
             (invoice_id,),
         )
         row = cur.fetchone()
@@ -2026,7 +2165,439 @@ def invoice_pdf(invoice_id: str):
 def mark_invoice_sent(invoice_id: str):
     """No real email delivery yet (confirmed with the user -- PDF generation only, for now) --
     this just records the invoice as sent in the database, stated plainly in the UI, not
-    presented as an actual email having gone out."""
+    presented as an actual email having gone out. simulation.invoices has no sent_at column
+    (unlike the old live.invoices) -- status alone is enough for a demo invoice."""
     with cursor() as cur:
-        cur.execute("update live.invoices set status = 'sent', sent_at = now() where invoice_id = %s", (invoice_id,))
+        cur.execute("update simulation.invoices set status = 'sent' where invoice_id = %s", (invoice_id,))
     return {"status": "sent"}
+
+
+# --------------------------------------------------------------------------------------------
+# Dispatch Board -- manual day-ahead dispatch (real hackathon-lead clarification: a fleet manager
+# assigns tomorrow's work today by hand, trucks/orders/drivers matched by type/capacity/hub, not a
+# single live-scored quote at a time). Thin wrappers only -- all DB logic lives in
+# sim/live/dispatch_board.py, matching this file's existing score_quote.py/seed_demo_fleet.py split.
+# --------------------------------------------------------------------------------------------
+
+def _dispatch_date(date_str: str) -> date:
+    """`date_str == "tomorrow"` resolves server-side -- "always the day before" is the product's
+    own stated assumption (a fleet manager always plans tomorrow's work today), not a UI nicety,
+    so the frontend doesn't need to compute or care about the server's notion of "today"."""
+    if date_str == "tomorrow":
+        return (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    return date.fromisoformat(date_str)
+
+
+class AssignOrderBody(BaseModel):
+    truck_number: str
+    order_id: uuid.UUID
+
+
+class AssignDriverBody(BaseModel):
+    truck_number: str
+    driver_id: int
+
+
+class UnassignOrderBody(BaseModel):
+    truck_number: str
+    order_id: uuid.UUID
+
+
+class UnassignDriverBody(BaseModel):
+    truck_number: str
+
+
+class SimulateSetupBody(BaseModel):
+    hub_counts: dict[str, int]
+    type_shares: dict[str, float]
+    num_orders: int
+    seed: int | None = None
+
+
+@app.get("/api/dispatch/{date_str}")
+def get_dispatch_board(date_str: str):
+    """Real user ask: no more silent auto-generation of a default-parameter day the first time a
+    date is opened -- the frontend checks this first; a 404 here means "no day yet, show the Setup
+    panel" (POST .../simulate creates one), not an error state."""
+    try:
+        service_date = _dispatch_date(date_str)
+        if dispatch_board.day_status(service_date) is None:
+            raise HTTPException(404, "no dispatch day generated yet for this date -- run Simulate first")
+        return dispatch_board.load_board(service_date)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/dispatch/{date_str}/simulate")
+def dispatch_simulate_setup(date_str: str, body: SimulateSetupBody):
+    """The Setup panel's "Simulate" button -- see sim/live/dispatch_board.py's simulate_setup()."""
+    try:
+        return dispatch_board.simulate_setup(
+            _dispatch_date(date_str), body.hub_counts, body.type_shares, body.num_orders, body.seed,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/dispatch/{date_str}/assign-order")
+def dispatch_assign_order(date_str: str, body: AssignOrderBody):
+    try:
+        rows = dispatch_board.assign_order(_dispatch_date(date_str), body.truck_number, body.order_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"assignments": rows}
+
+
+@app.post("/api/dispatch/{date_str}/unassign-order")
+def dispatch_unassign_order(date_str: str, body: UnassignOrderBody):
+    try:
+        rows = dispatch_board.unassign_order(_dispatch_date(date_str), body.truck_number, body.order_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"assignments": rows}
+
+
+@app.post("/api/dispatch/{date_str}/assign-driver")
+def dispatch_assign_driver(date_str: str, body: AssignDriverBody):
+    try:
+        rows = dispatch_board.assign_driver(_dispatch_date(date_str), body.truck_number, body.driver_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"assignments": rows}
+
+
+@app.post("/api/dispatch/{date_str}/unassign-driver")
+def dispatch_unassign_driver(date_str: str, body: UnassignDriverBody):
+    try:
+        rows = dispatch_board.unassign_driver(_dispatch_date(date_str), body.truck_number)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"assignments": rows}
+
+
+@app.post("/api/dispatch/{date_str}/ai-assign")
+def dispatch_ai_assign(date_str: str):
+    try:
+        return dispatch_board.ai_assign(_dispatch_date(date_str))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/dispatch/{date_str}/reset")
+def dispatch_reset(date_str: str):
+    try:
+        return dispatch_board.reset_assignments(_dispatch_date(date_str))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/dispatch/{date_str}/regenerate-orders")
+def dispatch_regenerate_orders(date_str: str):
+    """DEMO-ONLY -- see sim/live/dispatch_board.py's regenerate_order_book() docstring."""
+    try:
+        return dispatch_board.regenerate_order_book(_dispatch_date(date_str))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/dispatch/{date_str}/finalize")
+def dispatch_finalize(date_str: str):
+    try:
+        dispatch_board.finalize(_dispatch_date(date_str))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"status": "finalized"}
+
+
+@app.post("/api/dispatch/{date_str}/reopen")
+def dispatch_reopen(date_str: str):
+    try:
+        dispatch_board.reopen(_dispatch_date(date_str))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"status": "draft"}
+
+
+class TripGeofenceBody(BaseModel):
+    location_id: int
+    points: list[tuple[float, float]]  # [(lat, lon), ...], polygon vertices in map-drawn order
+
+
+@app.get("/api/trips/{trip_id}")
+def trip_detail(trip_id: uuid.UUID):
+    """Real user ask: every trip under each truck/driver on the Final Dispatch Plan should be a
+    clickable page -- full detail (pickup/dropoff, times, truck/load) plus the map + geofence
+    editor (see /api/trips/{trip_id}/geofence below)."""
+    with cursor() as cur:
+        cur.execute("""
+            select t.trip_id, t.driver_id, t.status, t.eta, t.created_at, t.planned_completion_at,
+                   t.origin_location_id, ol.label, ol.city, ol.lat, ol.lon, ol.radius_m,
+                   t.dest_location_id, dl.label, dl.city, dl.lat, dl.lon, dl.radius_m,
+                   t.weight_lbs, t.pallets, t.load_type,
+                   ds.truck_number, tp.truck_type, tp.capacity_lbs, tp.capacity_pallets
+            from live.trips t
+            join reference.locations ol on ol.location_id = t.origin_location_id
+            join reference.locations dl on dl.location_id = t.dest_location_id
+            left join live.driver_status ds on ds.driver_id = t.driver_id
+            left join calibration.truck_profile tp on tp.truck_number = ds.truck_number
+            where t.trip_id = %s
+        """, (str(trip_id),))
+        row = cur.fetchone()
+        if row is None:
+            raise HTTPException(404, "Trip not found")
+        (tid, driver_id, status, eta, created_at, planned_completion_at,
+         origin_id, origin_label, origin_city, origin_lat, origin_lon, origin_radius,
+         dest_id, dest_label, dest_city, dest_lat, dest_lon, dest_radius,
+         weight_lbs, pallets, load_type,
+         truck_number, truck_type, capacity_lbs, capacity_pallets) = row
+
+        cur.execute(
+            "select location_id, ST_AsGeoJSON(geom::geometry) from live.trip_geofence_overrides where trip_id = %s",
+            (str(trip_id),),
+        )
+        overrides = {r[0]: json.loads(r[1]) for r in cur.fetchall()}
+
+    def stop(location_id, label, city, lat, lon, radius_m):
+        override = overrides.get(location_id)
+        return {
+            'location_id': location_id, 'label': label, 'city': f"{city}, ON",
+            'lat': float(lat), 'lon': float(lon),
+            'default_radius_m': float(radius_m) if radius_m is not None else 120.0,
+            'geofence_source': 'manual' if override else 'default',
+            'manual_geometry': override,  # GeoJSON polygon ([lon,lat] rings) or null
+        }
+
+    return {
+        'trip_id': str(tid), 'driver_id': driver_id, 'status': status,
+        'eta': eta.isoformat() if eta else None,
+        'created_at': created_at.isoformat() if created_at else None,
+        'planned_completion_at': planned_completion_at.isoformat() if planned_completion_at else None,
+        'truck_number': truck_number, 'truck_type': truck_type,
+        'capacity_lbs': float(capacity_lbs) if capacity_lbs is not None else None,
+        'capacity_pallets': capacity_pallets,
+        'weight_lbs': float(weight_lbs) if weight_lbs is not None else None,
+        'pallets': pallets, 'load_type': load_type,
+        'pickup': stop(origin_id, origin_label, origin_city, origin_lat, origin_lon, origin_radius),
+        'dropoff': stop(dest_id, dest_label, dest_city, dest_lat, dest_lon, dest_radius),
+    }
+
+
+@app.get("/api/trips/{trip_id}/geofence")
+def get_trip_geofence(trip_id: uuid.UUID, location_id: int):
+    """Schema-agnostic (no dependency on live.trips OR simulation.trips existing) -- just the
+    override status + shape for one (trip_id, location_id) pair, plus the location's own default
+    radius as a fallback. Used by the Simulation Trip demo page, which has its own trip/location
+    IDs already in hand and doesn't need the fuller /api/trips/{trip_id} (real-dispatch-only) join."""
+    with cursor() as cur:
+        cur.execute("select radius_m from reference.locations where location_id = %s", (location_id,))
+        row = cur.fetchone()
+        default_radius = float(row[0]) if row and row[0] is not None else 120.0
+        cur.execute(
+            "select ST_AsGeoJSON(geom::geometry) from live.trip_geofence_overrides where trip_id = %s and location_id = %s",
+            (str(trip_id), location_id),
+        )
+        geom_row = cur.fetchone()
+    manual_geometry = json.loads(geom_row[0]) if geom_row else None
+    return {
+        'default_radius_m': default_radius,
+        'geofence_source': 'manual' if manual_geometry else 'default',
+        'manual_geometry': manual_geometry,
+    }
+
+
+@app.post("/api/trips/{trip_id}/geofence")
+def save_trip_geofence(trip_id: uuid.UUID, body: TripGeofenceBody):
+    """Manager-drawn custom geofence for ONE stop (pickup or dropoff) of ONE trip -- overrides the
+    location's own default radius circle for every future position tick on this trip (sim/sql/053
+    -- live.process_position_tick() AND simulation.process_position_tick() both check this table
+    first). Works identically for a real dispatch trip (live.trips) or a Simulation Trip demo run
+    (simulation.trips) -- the override table is keyed by trip_id + location_id only, no schema tie."""
+    if len(body.points) < 3:
+        raise HTTPException(400, "A geofence needs at least 3 points")
+    ring = list(body.points) + [body.points[0]]
+    wkt = "POLYGON((" + ", ".join(f"{lon} {lat}" for lat, lon in ring) + "))"
+    with cursor() as cur:
+        cur.execute(
+            """insert into live.trip_geofence_overrides (trip_id, location_id, geom)
+               values (%s, %s, ST_GeogFromText(%s))
+               on conflict (trip_id, location_id) do update set geom = excluded.geom, created_at = now()""",
+            (str(trip_id), body.location_id, wkt),
+        )
+    return {"status": "saved"}
+
+
+@app.delete("/api/trips/{trip_id}/geofence")
+def clear_trip_geofence(trip_id: uuid.UUID, location_id: int):
+    """Reverts one stop back to the location's default radius circle."""
+    with cursor() as cur:
+        cur.execute(
+            "delete from live.trip_geofence_overrides where trip_id = %s and location_id = %s",
+            (str(trip_id), location_id),
+        )
+    return {"status": "reverted"}
+
+
+@app.get("/api/drivers/{driver_id}/trips")
+def driver_trip_history(driver_id: int):
+    """Past (completed, live.trip_log) + future (queued 'scheduled', live.trips) trips for ONE
+    driver -- real user ask: clicking a truck on Live Ops should show its full picture (past
+    trips, current trip, upcoming trips, HOS), not just whatever's currently active. Current trip
+    is already covered by /api/fleet (joined via driver_status.current_trip_id) -- not repeated
+    here."""
+    with cursor() as cur:
+        cur.execute("""
+            select tl.trip_id, tl.completed_at, tl.on_time, t.origin_location_id, t.dest_location_id,
+                   t.weight_lbs, t.pallets, t.load_type, ol.city, dl.city
+            from live.trip_log tl
+            join live.trips t on t.trip_id = tl.trip_id
+            left join reference.locations ol on ol.location_id = t.origin_location_id
+            left join reference.locations dl on dl.location_id = t.dest_location_id
+            where tl.driver_id = %s
+            order by tl.completed_at desc
+            limit 10
+        """, (driver_id,))
+        past = [
+            {
+                "trip_id": str(r[0]), "completed_at": r[1].isoformat() if r[1] else None, "on_time": r[2],
+                "origin_city": r[8], "dest_city": r[9], "weight_lbs": float(r[5]) if r[5] is not None else None,
+                "pallets": r[6], "load_type": r[7],
+            }
+            for r in cur.fetchall()
+        ]
+
+        cur.execute("""
+            select t.trip_id, t.status, t.eta, t.planned_completion_at, t.weight_lbs, t.pallets, t.load_type,
+                   ol.city, dl.city
+            from live.trips t
+            left join reference.locations ol on ol.location_id = t.origin_location_id
+            left join reference.locations dl on dl.location_id = t.dest_location_id
+            where t.driver_id = %s and t.status = 'scheduled'
+            order by t.eta
+        """, (driver_id,))
+        future = [
+            {
+                "trip_id": str(r[0]), "status": r[1], "eta": r[2].isoformat() if r[2] else None,
+                "planned_completion_at": r[3].isoformat() if r[3] else None,
+                "weight_lbs": float(r[4]) if r[4] is not None else None, "pallets": r[5], "load_type": r[6],
+                "origin_city": r[7], "dest_city": r[8],
+            }
+            for r in cur.fetchall()
+        ]
+
+    return {"past": past, "future": future}
+
+
+# --------------------------------------------------------------------------------------------
+# Data page -- real user ask: "a page that will show this data tables from simulation showcase
+# in detail... like a sql data view page where on top we have tabs for tables and this page shows
+# those tables with description on top what this table is". Real user pivot: the simulation is
+# now the app's only data source (no more live.* telemetry), so this exposes exactly the
+# simulation.* tables sim/live/ai_dispatch_replay.py's generate() populates -- a real, whitelisted
+# set (never arbitrary SQL/table names from the client), each with a plain-language description.
+# --------------------------------------------------------------------------------------------
+
+DATA_TABLES: dict[str, dict[str, str]] = {
+    "runs": {
+        "label": "Simulation Runs",
+        "description": "One row per AI-dispatch replay run -- a full simulated day. Summarizes orders generated/completed, total revenue, deadhead cost, and detention billed for that run.",
+        "order_by": "created_at desc",
+    },
+    "trips": {
+        "label": "Trips",
+        "description": "One row per trip the AI dispatcher actually ran that day -- driver, route, load, and status. The core trip record everything else (trip_log, geofence_events, invoices) hangs off of.",
+        "order_by": "created_at desc",
+    },
+    "trip_log": {
+        "label": "Trip Log",
+        "description": "The completed-trip audit trail: dwell times at pickup/delivery, on-time performance, load fill ratio, and a real dollar reward figure (revenue minus deadhead cost minus detention). This is what the Trip History page displays.",
+        "order_by": "completed_at desc",
+    },
+    "geofence_events": {
+        "label": "Geofence Events",
+        "description": "Real arrival/departure events recorded at each delivery dock during a replay -- the trigger that starts and stops the detention clock, not a guessed timestamp.",
+        "order_by": "occurred_at desc",
+    },
+    "detention_billing": {
+        "label": "Detention Billing",
+        "description": "Per-trip-stop detention charges: the real free-hours allowance, arrival/departure timestamps, and the dollar amount owed once a dock stop runs past the free window.",
+        "order_by": "arrival_at desc",
+    },
+    "invoices": {
+        "label": "Invoices",
+        "description": "The CRA-itemized invoice generated for each completed trip -- linehaul, detention, fuel surcharge, and tax kept as separate line items, with subtotal/tax/total computed by the database itself. This is what the Billing page displays, generates, and sends.",
+        "order_by": "issued_at desc",
+    },
+    "driver_state_snapshots": {
+        "label": "Driver State Snapshots",
+        "description": "Point-in-time driver/truck state captured at each real milestone of a trip (assigned, arrived at pickup, departed pickup, arrived at delivery, completed) -- position, duty status, and remaining Hours-of-Service at that moment.",
+        "order_by": "snapshot_at desc",
+    },
+}
+
+
+@app.get("/api/data/tables")
+def data_tables():
+    """The tab list for the Data page -- table name, display label, and description, in one
+    place so the frontend never hardcodes table copy that could drift from what's actually here."""
+    return [{"table": name, **meta} for name, meta in DATA_TABLES.items()]
+
+
+@app.get("/api/data/{table}")
+def data_table_rows(table: str, limit: int = 200, filters: str | None = None, sort_col: str | None = None, sort_dir: str = "asc"):
+    """Rows for one whitelisted simulation.* table -- never arbitrary SQL or a client-supplied
+    table name beyond this fixed set, and columns are read back from the cursor itself (no need to
+    hand-maintain a column list per table here that could drift from the real schema).
+
+    Real user ask: Excel-style per-column filters and sort on the Data page (e.g. "filter driver
+    state snapshots for a trip and see it", "options to sort in descending or ascending order").
+    `filters` is a JSON object of {column: substring} from the frontend's own filter row; `sort_col`
+    (with `sort_dir`) overrides the table's default recency order when the user clicks a column
+    header. Both happen here, not just on the already-fetched page, since the default view is only
+    the most recent 200 rows across every run -- an older trip's snapshots could be well past that
+    page, and sorting only the visible page would be misleading rather than a real sort. Column
+    NAMES (both filter keys and sort_col) are validated against the real schema (via cur.description
+    on the table itself) before ever reaching the query string; values are always parameterized,
+    never interpolated -- no SQL injection surface from either side."""
+    meta = DATA_TABLES.get(table)
+    if meta is None:
+        raise HTTPException(404, f"Unknown data table {table!r}")
+    filter_dict: dict[str, str] = {}
+    if filters:
+        try:
+            filter_dict = json.loads(filters)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(400, "filters must be a JSON object of {column: substring}") from exc
+    with cursor() as cur:
+        cur.execute(f"select * from simulation.{table} limit 0")
+        all_cols = {d[0] for d in cur.description}
+        where_clauses: list[str] = []
+        params: list[object] = []
+        for col, value in filter_dict.items():
+            if col not in all_cols or not isinstance(value, str) or not value.strip():
+                continue
+            where_clauses.append(f'"{col}"::text ilike %s')
+            params.append(f"%{value.strip()}%")
+        where_sql = f"where {' and '.join(where_clauses)}" if where_clauses else ""
+        if sort_col is not None and sort_col in all_cols:
+            direction = "desc" if sort_dir == "desc" else "asc"
+            order_sql = f'"{sort_col}" {direction} nulls last'
+        else:
+            order_sql = meta["order_by"]
+        params.append(min(limit, 1000))
+        cur.execute(f"select * from simulation.{table} {where_sql} order by {order_sql} limit %s", params)
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+
+    def _serialize(v):
+        if isinstance(v, (datetime, date)):
+            return v.isoformat()
+        if isinstance(v, Decimal):
+            return float(v)
+        if isinstance(v, uuid.UUID):
+            return str(v)
+        return v
+
+    return {
+        "table": table, "columns": cols,
+        "rows": [[_serialize(v) for v in row] for row in rows],
+    }
