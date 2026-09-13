@@ -20,7 +20,8 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+import requests
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -2607,4 +2608,265 @@ def data_table_rows(table: str, limit: int = 200, filters: str | None = None, so
     return {
         "table": table, "columns": cols,
         "rows": [[_serialize(v) for v in row] for row in rows],
+    }
+
+
+# ============================================================================================
+# Driver Assist -- real user ask, built under a 1-hour time limit. A driver-only view: today's
+# trips as assigned by the Dispatch Board (dispatch.day_orders/assignments -- the real day-ahead
+# plan, not the AI-dispatch REPLAY used for the manager's Live Ops Simulation demo), load
+# acceptance, duty-status logging (the real 4-status HOS framework), and the pre-trip inspection
+# already built (Inspection.tsx) repointed at a working data source. All access goes through this
+# service-role connection -- dispatch.* has RLS enabled with zero policies (sim/sql/048), so the
+# browser's own Supabase client already can't touch it directly; identity is verified here from
+# the driver's real Supabase auth token before any query runs, never trusted from a client param.
+# ============================================================================================
+
+def _resolve_driver_id(authorization: str | None) -> int:
+    """Verifies the caller's Supabase session token for real (calls Supabase's own /auth/v1/user,
+    not a locally-decoded guess) and resolves it to a driver_id via public.profiles -- the same
+    real role source auth-context.tsx's own comment establishes ("role is checked server-side via
+    this table, never trusted from client state alone")."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing bearer token")
+    token = authorization.removeprefix("Bearer ")
+    supabase_url = os.environ["VITE_SUPABASE_URL"].rstrip("/")
+    resp = requests.get(
+        f"{supabase_url}/auth/v1/user",
+        headers={"Authorization": f"Bearer {token}", "apikey": os.environ["VITE_SUPABASE_ANON_KEY"]},
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        raise HTTPException(401, "Invalid or expired session")
+    user_id = resp.json()["id"]
+    with cursor() as cur:
+        cur.execute("select driver_id, role from public.profiles where user_id = %s", (user_id,))
+        row = cur.fetchone()
+    if row is None or row[1] != "driver" or row[0] is None:
+        raise HTTPException(403, "Not a driver account")
+    return row[0]
+
+
+@app.get("/api/driver/today")
+def driver_today(day: str | None = None, authorization: str | None = Header(default=None)):
+    """Assigned trips for the logged-in driver on a given calendar day (defaults to today), from
+    the real finalized Dispatch Board plan (whichever driver_id/truck_number the manager actually
+    assigned them to). Real user ask: "does this get created automatically for any day the driver
+    have trips assigned... can we have a calendar." There's no separate "create Driver Assist"
+    step -- it's a live read of whatever dispatch.day_orders/assignments already has for that
+    date, same as the manager's own Dispatch Board; `day` just picks which date to read."""
+    driver_id = _resolve_driver_id(authorization)
+    target_date = date.fromisoformat(day) if day else date.today()
+    with cursor() as cur:
+        cur.execute("select id, status from dispatch.days where service_date = %s", (target_date,))
+        day_row = cur.fetchone()
+        if day_row is None:
+            return {"service_date": target_date.isoformat(), "day_status": None, "truck_number": None, "trips": []}
+        day_id, day_status = day_row
+
+        cur.execute(
+            "select truck_number, order_ids from dispatch.assignments where day_id = %s and driver_id = %s",
+            (day_id, driver_id),
+        )
+        assignment = cur.fetchone()
+        if assignment is None or not assignment[1]:
+            return {"service_date": target_date.isoformat(), "day_status": day_status, "truck_number": None, "trips": []}
+        truck_number, order_ids = assignment
+
+        cur.execute(
+            """select o.id, o.pickup_location_id, o.dest_location_id, po.label, do_.label,
+                      o.weight_lbs, o.pallets, o.load_type, o.rate, o.pickup_at, o.delivery_eta, o.accepted_at
+               from dispatch.day_orders o
+               join reference.locations po on po.location_id = o.pickup_location_id
+               join reference.locations do_ on do_.location_id = o.dest_location_id
+               where o.id = any(%s)
+               order by o.pickup_at""",
+            (order_ids,),
+        )
+        trips = [
+            {
+                "order_id": str(r[0]), "pickup_location_id": r[1], "dest_location_id": r[2],
+                "pickup_label": r[3], "dest_label": r[4], "weight_lbs": float(r[5]), "pallets": r[6],
+                "load_type": r[7], "rate": float(r[8]), "pickup_at": r[9].isoformat(), "delivery_eta": r[10].isoformat() if r[10] else None,
+                "accepted_at": r[11].isoformat() if r[11] else None,
+            }
+            for r in cur.fetchall()
+        ]
+    return {"service_date": target_date.isoformat(), "day_status": day_status, "truck_number": truck_number, "trips": trips}
+
+
+class AcceptOrderBody(BaseModel):
+    order_id: str
+
+
+@app.post("/api/driver/accept-order")
+def driver_accept_order(body: AcceptOrderBody, authorization: str | None = Header(default=None)):
+    """Not scoped to today's date -- a driver can view a future day's trips (see the calendar in
+    driver_today) and accept one ahead of time, so ownership is checked directly against the
+    order's own day, whichever day that is."""
+    driver_id = _resolve_driver_id(authorization)
+    with cursor() as cur:
+        cur.execute(
+            """update dispatch.day_orders o set accepted_at = now()
+               where o.id = %s and o.id = any(
+                 select unnest(a.order_ids) from dispatch.assignments a
+                 where a.driver_id = %s and a.day_id = o.day_id
+               )
+               returning o.accepted_at""",
+            (uuid.UUID(body.order_id), driver_id),
+        )
+        row = cur.fetchone()
+    if row is None:
+        raise HTTPException(404, "Order not found in your assignment")
+    return {"order_id": body.order_id, "accepted_at": row[0].isoformat()}
+
+
+class DutyStatusBody(BaseModel):
+    status: str
+    odometer_km: float | None = None
+    note: str | None = None
+
+
+DUTY_STATUSES = {"off_duty", "sleeper_berth", "driving", "on_duty_not_driving"}
+
+
+@app.post("/api/driver/duty-status")
+def driver_duty_status(body: DutyStatusBody, authorization: str | None = Header(default=None)):
+    """Real 4-status HOS duty log (49 CFR Part 395 / Canada's ELD Technical Standard) -- a
+    timestamped entry every time the driver's activity changes, same real-world convention an
+    ELD follows."""
+    if body.status not in DUTY_STATUSES:
+        raise HTTPException(400, f"status must be one of {sorted(DUTY_STATUSES)}")
+    driver_id = _resolve_driver_id(authorization)
+    today = date.today()
+    with cursor() as cur:
+        cur.execute("select id from dispatch.days where service_date = %s", (today,))
+        day_row = cur.fetchone()
+        day_id = day_row[0] if day_row else None
+        cur.execute(
+            "insert into dispatch.duty_status_log (day_id, driver_id, status, odometer_km, note) "
+            "values (%s, %s, %s, %s, %s) returning id, logged_at",
+            (day_id, driver_id, body.status, body.odometer_km, body.note),
+        )
+        new_id, logged_at = cur.fetchone()
+    return {"id": new_id, "status": body.status, "logged_at": logged_at.isoformat()}
+
+
+@app.get("/api/driver/duty-log")
+def driver_duty_log(authorization: str | None = Header(default=None)):
+    driver_id = _resolve_driver_id(authorization)
+    today = date.today()
+    with cursor() as cur:
+        cur.execute(
+            """select l.status, l.logged_at, l.odometer_km, l.note from dispatch.duty_status_log l
+               join dispatch.days d on d.id = l.day_id
+               where l.driver_id = %s and d.service_date = %s
+               order by l.logged_at desc""",
+            (driver_id, today),
+        )
+        rows = [{"status": r[0], "logged_at": r[1].isoformat(), "odometer_km": float(r[2]) if r[2] is not None else None, "note": r[3]} for r in cur.fetchall()]
+    return {"entries": rows}
+
+
+class InspectionBody(BaseModel):
+    brakes_ok: bool
+    tires_ok: bool
+    lights_ok: bool
+    fluid_levels_ok: bool
+    coupling_ok: bool
+    trailer_ok: bool
+    odometer_km: float | None = None
+    defects_noted: str | None = None
+
+
+@app.post("/api/driver/inspection")
+def driver_inspection(body: InspectionBody, authorization: str | None = Header(default=None)):
+    """Pre-trip DVIR (49 CFR Sec.396.11/.13 -- see Inspection.tsx's own note on the real 11
+    federal categories vs. this condensed 6). Repointed here from the dead live.driver_status
+    lookup: truck_number now comes from today's real Dispatch Board assignment."""
+    driver_id = _resolve_driver_id(authorization)
+    today = date.today()
+    overall_pass = all([body.brakes_ok, body.tires_ok, body.lights_ok, body.fluid_levels_ok, body.coupling_ok, body.trailer_ok])
+    with cursor() as cur:
+        cur.execute(
+            """select a.truck_number from dispatch.assignments a join dispatch.days d on d.id = a.day_id
+               where a.driver_id = %s and d.service_date = %s""",
+            (driver_id, today),
+        )
+        row = cur.fetchone()
+        truck_number = row[0] if row else None
+        cur.execute(
+            """insert into live.vehicle_inspections
+               (driver_id, truck_number, odometer_km, brakes_ok, tires_ok, lights_ok, fluid_levels_ok, coupling_ok, trailer_ok, defects_noted)
+               values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               returning submitted_at, overall_pass""",
+            (driver_id, truck_number, body.odometer_km, body.brakes_ok, body.tires_ok, body.lights_ok,
+             body.fluid_levels_ok, body.coupling_ok, body.trailer_ok, body.defects_noted),
+        )
+        submitted_at, overall_pass = cur.fetchone()
+    return {"truck_number": truck_number, "overall_pass": overall_pass, "submitted_at": submitted_at.isoformat()}
+
+
+@app.get("/api/driver/last-inspection")
+def driver_last_inspection(authorization: str | None = Header(default=None)):
+    driver_id = _resolve_driver_id(authorization)
+    with cursor() as cur:
+        cur.execute(
+            "select submitted_at, overall_pass from live.vehicle_inspections where driver_id = %s order by submitted_at desc limit 1",
+            (driver_id,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return {"submitted_at": None, "overall_pass": None}
+    return {"submitted_at": row[0].isoformat(), "overall_pass": row[1]}
+
+
+@app.get("/api/manager/driver-live-status")
+def manager_driver_live_status():
+    """Real user ask: the Drivers page's Status column always reads 'off_duty' -- true but
+    misleading, since it's a completed simulation's TERMINAL snapshot (every driver ends their
+    simulated day back at hub), not a live status. Returns, per driver, TODAY's real
+    dispatch.duty_status_log entry (actually logged via Driver Assist) plus real load-acceptance
+    counts (dispatch.day_orders.accepted_at) -- both genuinely live, unlike the simulation
+    exhaust. Drivers with no Driver Assist account simply have no row here (honest gap, not a
+    guessed status)."""
+    today = date.today()
+    with cursor() as cur:
+        cur.execute("select id from dispatch.days where service_date = %s", (today,))
+        day_row = cur.fetchone()
+        if day_row is None:
+            return {"drivers": {}}
+        day_id = day_row[0]
+
+        cur.execute(
+            """select distinct on (driver_id) driver_id, status, logged_at
+               from dispatch.duty_status_log where day_id = %s order by driver_id, logged_at desc""",
+            (day_id,),
+        )
+        live_status = {r[0]: {"status": r[1], "logged_at": r[2].isoformat()} for r in cur.fetchall()}
+
+        cur.execute(
+            """select a.driver_id,
+                      count(*) filter (where o.id is not null) as total,
+                      count(*) filter (where o.accepted_at is not null) as accepted
+               from dispatch.assignments a
+               join lateral unnest(a.order_ids) as oid on true
+               join dispatch.day_orders o on o.id = oid
+               where a.day_id = %s
+               group by a.driver_id""",
+            (day_id,),
+        )
+        acceptance = {r[0]: {"total": r[1], "accepted": r[2]} for r in cur.fetchall()}
+
+    driver_ids = set(live_status) | set(acceptance)
+    return {
+        "drivers": {
+            str(d): {
+                "live_status": live_status.get(d, {}).get("status"),
+                "live_status_at": live_status.get(d, {}).get("logged_at"),
+                "orders_accepted": acceptance.get(d, {}).get("accepted", 0),
+                "orders_total": acceptance.get(d, {}).get("total", 0),
+            }
+            for d in driver_ids
+        }
     }

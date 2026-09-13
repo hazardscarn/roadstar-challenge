@@ -600,6 +600,15 @@ export default function DispatchBoard() {
                           <div className="flex items-center gap-3 pl-5.5 text-[11px] text-ink-400">
                             <span>P: {o.pickup_city} @ {format(new Date(o.pickup_at), 'HH:mm')}</span>
                             <span>D: {o.dest_city} @ {format(new Date(o.delivery_eta), 'HH:mm')}</span>
+                            {/* Real user ask: "how does the dispatch know the driver have
+                                accepted trips" -- set by the driver's own Accept button in
+                                Driver Assist, surfaced here so a manager can see it without
+                                a separate page. */}
+                            {o.accepted_at ? (
+                              <span className="font-medium text-status-green-500">✓ Accepted {format(new Date(o.accepted_at), 'HH:mm')}</span>
+                            ) : (
+                              <span className="text-status-amber-500">Not yet accepted</span>
+                            )}
                           </div>
                         </div>
                       ))}

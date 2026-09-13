@@ -33,9 +33,9 @@ export default function SignIn() {
         <CardHeader>
           <div className="mb-1 flex items-center gap-2">
             <div className="flex size-8 items-center justify-center rounded-lg bg-brand-600 font-display text-sm font-bold text-white">
-              R
+              A
             </div>
-            <span className="font-display text-lg font-bold text-ink-900">RoadStar</span>
+            <span className="font-display text-lg font-bold text-ink-900">Alfred</span>
           </div>
           <CardTitle>Sign in</CardTitle>
           <CardDescription>Southern Ontario city dispatch — manager and driver access.</CardDescription>

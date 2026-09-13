@@ -1,10 +1,10 @@
-import { format } from 'date-fns'
 import { Home, Loader2, Satellite, X } from 'lucide-react'
 import * as React from 'react'
 import { FleetMap, type MapPin, type RouteSegment } from '@/components/fleet-map'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { getOrderStory, type OrderStory, type OrderStoryCycle } from '@/lib/simulation-api'
+import { formatSimTime } from '@/lib/utils'
 
 function toRoute(trajectory: [number, number, number][], color: string, weight?: number): RouteSegment | null {
   if (!trajectory || trajectory.length < 2) return null
@@ -82,7 +82,7 @@ function StoryBody({ story }: { story: OrderStory }) {
             <Badge tone={quote.service_type === 'LTL' ? 'amber' : 'blue'}>{quote.service_type}</Badge>
           </div>
           <div className="mt-1 text-xs text-ink-500">
-            Quote time {format(new Date(quote.requested_at), 'MMM d, h:mm a')} · Requested pickup {format(new Date(quote.requested_pickup_at), 'MMM d, h:mm a')}
+            Quote time {formatSimTime(quote.requested_at, 'MMM d, h:mm a')} · Requested pickup {formatSimTime(quote.requested_pickup_at, 'MMM d, h:mm a')}
           </div>
           <div className="mt-1 text-xs text-ink-500">
             {quote.weight_lbs.toLocaleString()} lbs · {quote.pallets} pallets · {quote.load_type}
@@ -376,7 +376,7 @@ function SectionLabel({ n, title }: { n: number; title: string }) {
 function TimelineRow({ label, at, confirmed, faded, badge }: { label: string; at: string | null; confirmed?: boolean; faded?: boolean; badge?: { tone: 'green' | 'amber'; text: string } }) {
   return (
     <div className={`flex items-center gap-3 text-xs ${faded ? 'opacity-60' : ''}`}>
-      <span className="w-24 shrink-0 text-ink-400">{at ? format(new Date(at), 'MMM d, HH:mm') : '—'}</span>
+      <span className="w-24 shrink-0 text-ink-400">{at ? formatSimTime(at, 'MMM d, HH:mm') : '—'}</span>
       <span className={`size-1.5 shrink-0 rounded-full ${confirmed ? 'bg-status-green-500' : faded ? 'bg-ink-300' : 'bg-brand-500'}`} />
       <span className="flex-1 text-ink-700">{label}</span>
       {badge && <Badge tone={badge.tone}>{badge.text}</Badge>}

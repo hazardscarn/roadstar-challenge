@@ -1,9 +1,9 @@
-import { format } from 'date-fns'
 import * as React from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
+import { formatSimTime } from '@/lib/utils'
 
 // The "show them this table logging happening" panel -- real Supabase reads against the
 // `simulation` schema (sim/sql/038) for the run that just ran, not client-side JSON. Proves the
@@ -78,7 +78,7 @@ function formatCell(v: unknown): string {
   if (v == null) return '—'
   if (typeof v === 'boolean') return v ? 'true' : 'false'
   if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
-    try { return format(new Date(v), 'MMM d, HH:mm:ss') } catch { return v }
+    try { return formatSimTime(v, 'MMM d, HH:mm:ss') } catch { return v }
   }
   if (typeof v === 'number') return v.toFixed(2)
   return String(v)

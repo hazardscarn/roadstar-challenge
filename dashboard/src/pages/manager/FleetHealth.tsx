@@ -45,7 +45,11 @@ export default function FleetHealth() {
   const refresh = React.useCallback(async () => {
     // Real user pivot: no more live.* -- reads whichever simulation run is most recent (a fresh
     // AI-dispatch replay), not a single always-on live table.
-    const { data: latestRun } = await supabase.schema('simulation').from('runs').select('run_id').order('created_at', { ascending: false }).limit(1).single()
+    // Real bug found directly: without filtering by run_kind, this picked up whatever run was
+    // most recently created REGARDLESS of type -- including a 'trip_demo' run (the separate
+    // single-trip Simulation Trip demo page), which never populates truck_maintenance_state at
+    // all. Scoped to the real fleet-wide AI-dispatch-day replay specifically.
+    const { data: latestRun } = await supabase.schema('simulation').from('runs').select('run_id').eq('run_kind', 'ai_dispatch_day').order('created_at', { ascending: false }).limit(1).single()
     if (!latestRun) {
       setRows([])
       return

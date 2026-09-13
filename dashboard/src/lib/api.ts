@@ -167,6 +167,9 @@ export interface DispatchOrder {
   trip_id: string | null
   pickup_geofence_source: 'manual' | 'default'
   dropoff_geofence_source: 'manual' | 'default'
+  // Real user ask: "how does the dispatch know the driver have accepted trips" -- set by the
+  // driver's own Accept button in Driver Assist (POST /api/driver/accept-order), null until then.
+  accepted_at: string | null
   // Real, computed diagnosis for why THIS order couldn't be matched (equipment type, capacity,
   // driver-hub reach, or a scheduling trade-off) -- null while the order is actually assigned.
   unassigned_reason: string | null

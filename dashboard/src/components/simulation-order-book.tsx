@@ -1,8 +1,8 @@
-import { format } from 'date-fns'
 import * as React from 'react'
 import { Badge } from '@/components/ui/badge'
 import { supabase } from '@/lib/supabase'
 import type { SimTrip } from '@/lib/simulation-api'
+import { formatSimTime } from '@/lib/utils'
 
 // Real user feedback: the Simulation Showcase needs "the orderbook on the left and the selection
 // candidates" -- order book status colors (completed=green, lost opportunity=red, ongoing=amber,
@@ -212,7 +212,7 @@ export function SimulationOrderBook({
                 {trip?.reload_immediate && trip.deadhead_saved > 0 && status === 'completed' && <Badge tone="green">+${trip.deadhead_saved.toFixed(0)} saved</Badge>}
               </div>
               <div className="mt-0.5 text-ink-400">
-                Quote {format(new Date(o.requested_at), 'MMM d, HH:mm')} · Pickup {format(new Date(o.requested_pickup_at), 'MMM d, HH:mm')}
+                Quote {formatSimTime(o.requested_at, 'MMM d, HH:mm')} · Pickup {formatSimTime(o.requested_pickup_at, 'MMM d, HH:mm')}
               </div>
               <div className="flex items-center gap-1.5 text-ink-400">
                 <span>{o.weight_lbs.toLocaleString()} lbs · {o.pallets} plt · {o.load_type}</span>
